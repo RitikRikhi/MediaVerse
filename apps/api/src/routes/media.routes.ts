@@ -33,7 +33,7 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage,
   limits: {
-    fileSize: 1024 * 1024 * 1024 * 5 // Up to 5GB per raw video file
+    fileSize: 1024 * 1024 * 1024 * 12 // Up to 12GB per file
   }
 });
 
@@ -79,6 +79,183 @@ mediaRouter.get('/', authMiddleware, (req: AuthenticatedRequest, res: Response) 
     success: true,
     data: list
   });
+});
+
+// 1. Direct Browser-to-Drive: Create Resumable Upload Session
+mediaRouter.post('/upload-session', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const {
+      filename,
+      fileSizeBytes,
+      mimeType,
+      targetFolderId,
+      targetFolderPath,
+      assignmentId,
+      eventId,
+      mediaType = 'RAW_PHOTO',
+      description
+    } = req.body;
+
+    if (!filename || !fileSizeBytes || !mimeType) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_INPUT', message: 'filename, fileSizeBytes, and mimeType are required to initiate an upload session.' }
+      });
+    }
+
+    const targetAssignment = assignmentId ? db.assignments.find(a => a.id === assignmentId) : undefined;
+    const destination = DriveService.resolveDestination(targetAssignment?.day_session, mediaType);
+
+    const session = await DriveService.createResumableUploadSession({
+      filename,
+      mimeType,
+      sizeBytes: Number(fileSizeBytes),
+      targetFolderId,
+      targetFolderPath,
+      description,
+      destination
+    });
+
+    res.json({
+      success: true,
+      data: session
+    });
+  } catch (err: any) {
+    console.error('[Upload Session Error]', err);
+    const isAuthError = err.message?.includes('GOOGLE_DRIVE_NOT_CONNECTED') || err.message?.includes('not connected');
+    res.status(isAuthError ? 401 : 500).json({
+      success: false,
+      error: {
+        code: isAuthError ? 'GOOGLE_DRIVE_NOT_CONNECTED' : 'SESSION_INIT_FAILED',
+        message: err.message || 'Failed to initialize Google Drive upload session',
+        authUrl: isAuthError ? DriveService.getOAuthUrl() : undefined
+      }
+    });
+  }
+});
+
+// 2. Direct Browser-to-Drive: Finalize Upload & Persist to Supabase
+mediaRouter.post('/upload-complete', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const {
+      driveFileId,
+      filename,
+      fileSizeBytes,
+      mimeType,
+      driveWebUrl,
+      driveThumbnailUrl,
+      assignmentId,
+      eventId,
+      mediaType = 'RAW_PHOTO',
+      targetFolderId,
+      targetFolderPath,
+      description = '',
+      tags = ''
+    } = req.body;
+
+    if (!driveFileId || !filename) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_INPUT', message: 'driveFileId and filename are required.' }
+      });
+    }
+
+    // Duplicate check: check if asset with this drive_file_id already registered
+    const existing = db.mediaAssets.find(m => m.drive_file_id === driveFileId);
+    if (existing) {
+      return res.json({
+        success: true,
+        data: {
+          asset: existing,
+          message: 'Asset was already registered.'
+        }
+      });
+    }
+
+    const targetAssignment = assignmentId ? db.assignments.find(a => a.id === assignmentId) : undefined;
+    const targetEventId = eventId || targetAssignment?.event_id || db.events[0]?.id;
+
+    const parsedTags = typeof tags === 'string'
+      ? tags.split(',').map(t => t.trim().toLowerCase()).filter(Boolean)
+      : Array.isArray(tags) ? tags : [];
+
+    const newAsset: MediaAsset = {
+      id: crypto.randomUUID(),
+      event_id: targetEventId,
+      assignment_id: assignmentId,
+      assignment_title: targetAssignment?.title,
+      uploader_id: req.user!.id,
+      uploader_name: req.user!.full_name,
+      filename,
+      media_type: mediaType,
+      drive_file_id: driveFileId,
+      drive_web_url: driveWebUrl || `https://drive.google.com/file/d/${driveFileId}/view`,
+      drive_thumbnail_url: driveThumbnailUrl || (mediaType.includes('VIDEO')
+        ? 'https://images.unsplash.com/photo-1492691527719-9d1e07e534b4?w=300'
+        : 'https://images.unsplash.com/photo-1542038784456-1ea8e935640e?w=300'),
+      file_size_bytes: Number(fileSizeBytes) || 0,
+      mime_type: mimeType,
+      capture_time: new Date().toISOString(),
+      description,
+      tags: parsedTags,
+      is_verified: true,
+      created_at: new Date().toISOString()
+    };
+
+    db.mediaAssets.push(newAsset);
+    await SupabaseService.persistMediaAsset(newAsset);
+
+    // Advance assignment status if in progress
+    if (targetAssignment) {
+      if (targetAssignment.status === 'ASSIGNED' || targetAssignment.status === 'CAPTURING') {
+        targetAssignment.status = 'AVAILABLE_FOR_EDITING';
+        targetAssignment.updated_at = new Date().toISOString();
+      }
+    }
+
+    AuditService.log({
+      actorId: req.user!.id,
+      actorName: req.user!.full_name,
+      actorRole: req.user!.roles[0],
+      action: 'DIRECT_DRIVE_UPLOAD_COMPLETE',
+      entityType: 'MEDIA_ASSET',
+      entityId: newAsset.id,
+      details: {
+        filename: newAsset.filename,
+        sizeBytes: newAsset.file_size_bytes,
+        driveFolder: targetFolderPath,
+        driveFolderId: targetFolderId,
+        assignmentId: newAsset.assignment_id
+      }
+    });
+
+    NotificationService.broadcastToRoles(['VIDEO_EDITOR', 'MEDIA_COORDINATOR'], {
+      title: 'New Media Ready in Drive',
+      message: `${req.user!.full_name} uploaded "${newAsset.filename}" directly to Google Drive for ${targetAssignment?.title || 'SAVISKAR 2026'}.`,
+      type: 'UPLOAD',
+      linkUrl: '/media'
+    });
+
+    res.status(201).json({
+      success: true,
+      data: {
+        asset: newAsset,
+        destination: {
+          fullPath: targetFolderPath,
+          folderName: targetFolderPath,
+          driveFolderId: targetFolderId,
+          driveFolderUrl: `https://drive.google.com/drive/folders/${targetFolderId}`
+        },
+        message: `Successfully uploaded ${newAsset.filename} directly to Google Drive`
+      }
+    });
+  } catch (err: any) {
+    console.error('[Upload Complete Error]', err);
+    res.status(500).json({
+      success: false,
+      error: { code: 'SAVE_FAILED', message: err.message || 'Failed to complete media upload registration' }
+    });
+  }
 });
 
 // Real Automated File Upload (Photographer / Videographer direct upload to Google Drive)

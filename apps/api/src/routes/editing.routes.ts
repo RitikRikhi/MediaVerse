@@ -33,7 +33,7 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage,
   limits: {
-    fileSize: 1024 * 1024 * 1024 * 5 // Up to 5GB per edited video cut
+    fileSize: 1024 * 1024 * 1024 * 12 // Up to 12GB per edited video cut
   }
 });
 

@@ -230,6 +230,54 @@ class ApiClient {
     });
   }
 
+  async createUploadSession(payload: {
+    filename: string;
+    fileSizeBytes: number;
+    mimeType: string;
+    targetFolderId?: string;
+    targetFolderPath?: string;
+    assignmentId?: string;
+    eventId?: string;
+    mediaType?: string;
+    description?: string;
+  }): Promise<{
+    uploadUrl: string;
+    targetFolderId: string;
+    targetFolderPath: string;
+    chunkSizeBytes: number;
+  }> {
+    return this.request<{
+      uploadUrl: string;
+      targetFolderId: string;
+      targetFolderPath: string;
+      chunkSizeBytes: number;
+    }>('/media/upload-session', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async completeDirectUpload(payload: {
+    driveFileId: string;
+    filename: string;
+    fileSizeBytes: number;
+    mimeType: string;
+    driveWebUrl?: string;
+    driveThumbnailUrl?: string;
+    assignmentId?: string;
+    eventId?: string;
+    mediaType?: string;
+    targetFolderId?: string;
+    targetFolderPath?: string;
+    description?: string;
+    tags?: string[];
+  }): Promise<{ asset: MediaAsset; destination: any; message: string }> {
+    return this.request<{ asset: MediaAsset; destination: any; message: string }>('/media/upload-complete', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
   async getResolvedDestination(daySession?: string, mediaType?: string): Promise<any> {
     const q = new URLSearchParams();
     if (daySession) q.set('day_session', daySession);

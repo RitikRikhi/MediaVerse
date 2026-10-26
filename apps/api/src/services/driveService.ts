@@ -1409,6 +1409,87 @@ export class DriveService {
     }
   }
 
+  // Create direct browser-to-Drive resumable upload session (no file routing through server)
+  static async createResumableUploadSession(options: {
+    filename: string;
+    mimeType: string;
+    sizeBytes: number;
+    targetFolderId?: string;
+    targetFolderPath?: string;
+    description?: string;
+    destination?: UploadDestination;
+  }): Promise<{
+    uploadUrl: string;
+    targetFolderId: string;
+    targetFolderPath: string;
+    chunkSizeBytes: number;
+  }> {
+    const token = await this.getValidAccessToken();
+    if (!token) {
+      throw new Error('GOOGLE_DRIVE_NOT_CONNECTED: Google Drive is not connected or token expired.');
+    }
+
+    let destinationFolderId = (options.targetFolderId || '').trim();
+    let finalFolderPath = (options.targetFolderPath || '').trim();
+
+    if (!destinationFolderId) {
+      const dest = options.destination || this.resolveDestination();
+      if (dest.driveFolderId && !dest.driveFolderId.startsWith('sav26-')) {
+        destinationFolderId = dest.driveFolderId;
+        finalFolderPath = dest.fullPath;
+      } else {
+        const root = await this.resolveRootFolderId();
+        const rootId = root.id;
+        finalFolderPath = dest.fullPath;
+        const dayFolderId = await this.getOrCreateDriveFolder(dest.day, rootId);
+        destinationFolderId = await this.getOrCreateDriveFolder(dest.category, dayFolderId);
+      }
+    }
+
+    if (!finalFolderPath && destinationFolderId) {
+      const match = db.mediaFolders.find(f => f.drive_folder_id === destinationFolderId);
+      if (match) finalFolderPath = match.folder_path;
+      else finalFolderPath = 'SAVISKAR 2026';
+    }
+
+    console.log(`[DriveService] Creating direct browser-to-Drive upload session for "${options.filename}" (${options.mimeType}, ${(options.sizeBytes / (1024 * 1024)).toFixed(2)} MB) in folder "${finalFolderPath}" (${destinationFolderId})...`);
+
+    const metadata = {
+      name: options.filename,
+      parents: [destinationFolderId],
+      description: options.description || `Uploaded via DSA MediaVerse directly to Google Drive -> ${finalFolderPath}`
+    };
+
+    const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json; charset=UTF-8',
+        'X-Upload-Content-Type': options.mimeType,
+        'X-Upload-Content-Length': String(options.sizeBytes)
+      },
+      body: JSON.stringify(metadata)
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      console.error(`[DriveService] Failed to create resumable upload session (${res.status}): ${errText}`);
+      throw new Error(`Google Drive Resumable Upload session failed (${res.status}): ${errText}`);
+    }
+
+    const uploadUrl = res.headers.get('location');
+    if (!uploadUrl) {
+      throw new Error('Google Drive did not return a resumable session Location URL.');
+    }
+
+    return {
+      uploadUrl,
+      targetFolderId: destinationFolderId,
+      targetFolderPath: finalFolderPath,
+      chunkSizeBytes: 8 * 1024 * 1024 // 8 MiB (8388608 bytes)
+    };
+  }
+
   // Real File Upload Handler (Streams to Google Drive with 0ms pre-lookup and 16MB chunked streaming for large files)
   static async uploadFileToDrive(options: {
     filePath: string;

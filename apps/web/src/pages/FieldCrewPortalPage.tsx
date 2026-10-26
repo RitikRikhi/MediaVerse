@@ -7,6 +7,7 @@ import { PriorityBadge } from '../components/ui/PriorityBadge';
 import { Modal } from '../components/ui/Modal';
 import { InteractiveFolderTree } from '../components/drive/InteractiveFolderTree';
 import { optimizeImageFile } from '../lib/imageOptimizer';
+import { uploadDirectToGoogleDrive } from '../lib/driveUploadEngine';
 import {
   Camera,
   Film,
@@ -44,6 +45,10 @@ interface QueuedFile {
   mediaType: MediaType;
   status: 'QUEUED' | 'OPTIMIZING' | 'UPLOADING' | 'COMPLETED' | 'FAILED';
   progress: number;
+  loadedBytes?: number;
+  totalBytes?: number;
+  speedBytesPerSec?: number;
+  etaSeconds?: number;
   error?: string;
   driveWebUrl?: string;
   driveFolderUrl?: string;
@@ -349,7 +354,21 @@ export const FieldCrewPortalPage: React.FC = () => {
     setUploadFiles(prev => prev.filter(f => f.id !== id));
   };
 
-  // Upload single file with auto-retry
+  const formatSpeed = (bytesPerSec?: number): string => {
+    if (!bytesPerSec || bytesPerSec === 0) return '';
+    const mb = bytesPerSec / (1024 * 1024);
+    if (mb >= 1) return `${mb.toFixed(1)} MB/s`;
+    return `${Math.round(bytesPerSec / 1024)} KB/s`;
+  };
+
+  const formatEta = (seconds?: number): string => {
+    if (!seconds || seconds <= 0 || !isFinite(seconds)) return '';
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}m ${secs < 10 ? '0' : ''}${secs}s`;
+  };
+
+  // Upload single file directly to Google Drive in 8 MiB chunks with auto-retry & offset resumption
   const uploadSingleFileWithRetry = async (
     item: QueuedFile,
     assignment: Assignment,
@@ -358,22 +377,46 @@ export const FieldCrewPortalPage: React.FC = () => {
     let attempts = 0;
     while (attempts <= maxRetries) {
       try {
-        const formData = new FormData();
-        formData.append('file', item.file);
-        formData.append('assignment_id', assignment.id);
-        formData.append('event_id', assignment.event_id);
-        formData.append('media_type', item.mediaType);
-        formData.append('description', `Uploaded for ${assignment.title}`);
-        formData.append('target_folder_id', selectedFolderId || '');
-        formData.append('target_folder_path', selectedFolderPath || '');
-
-        const result = await api.uploadMediaFile(formData, (percent) => {
-          setUploadFiles(prev =>
-            prev.map(f => (f.id === item.id ? { ...f, progress: percent } : f))
-          );
+        const result = await uploadDirectToGoogleDrive({
+          file: item.file,
+          assignmentId: assignment.id,
+          eventId: assignment.event_id,
+          mediaType: item.mediaType,
+          targetFolderId: selectedFolderId || destinationFolderInfo?.driveFolderId,
+          targetFolderPath: selectedFolderPath || destinationFolderInfo?.fullPath,
+          description: `Uploaded for ${assignment.title}`,
+          onProgress: (prog) => {
+            setUploadFiles(prev =>
+              prev.map(f =>
+                f.id === item.id
+                  ? {
+                      ...f,
+                      progress: prog.percentage,
+                      loadedBytes: prog.loadedBytes,
+                      totalBytes: prog.totalBytes,
+                      speedBytesPerSec: prog.speedBytesPerSec,
+                      etaSeconds: prog.etaSeconds
+                    }
+                  : f
+              )
+            );
+          }
         });
 
-        return { success: true, data: result };
+        if (result.success) {
+          return {
+            success: true,
+            data: {
+              asset: result.asset,
+              destination: result.destination || {
+                driveFolderUrl: result.driveFolderUrl,
+                driveFolderId: selectedFolderId || destinationFolderInfo?.driveFolderId
+              }
+            }
+          };
+        } else {
+          throw new Error(result.error || 'Direct Drive upload failed');
+        }
       } catch (err: any) {
         attempts++;
         if (attempts > maxRetries) {
@@ -483,6 +526,14 @@ export const FieldCrewPortalPage: React.FC = () => {
   const totalUploadBytes = uploadFiles.reduce((acc, f) => acc + f.file.size, 0);
   const totalSavedBytes = Math.max(0, totalOriginalBytes - totalUploadBytes);
   const totalSavedMB = (totalSavedBytes / (1024 * 1024)).toFixed(1);
+
+  const totalQueueBytes = uploadFiles.reduce((acc, f) => acc + f.file.size, 0);
+  const totalQueueLoadedBytes = uploadFiles.reduce((acc, f) => {
+    if (f.status === 'COMPLETED') return acc + f.file.size;
+    return acc + (f.loadedBytes || 0);
+  }, 0);
+  const overallQueuePercent = totalQueueBytes > 0 ? Math.min(100, Math.round((totalQueueLoadedBytes / totalQueueBytes) * 100)) : 0;
+  const activeSpeed = uploadFiles.find(f => f.status === 'UPLOADING' && f.speedBytesPerSec)?.speedBytesPerSec;
 
   const pendingCount = uploadFiles.filter(f => f.status === 'QUEUED' || f.status === 'FAILED').length;
   const completedCount = uploadFiles.filter(f => f.status === 'COMPLETED').length;
@@ -978,23 +1029,37 @@ export const FieldCrewPortalPage: React.FC = () => {
                   {uploadFiles.length > 0 && (
                     <div className="p-5 rounded-2xl bg-white border border-slate-200/80 shadow-xs space-y-4">
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
-                        <div>
+                        <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2">
                             <h4 className="text-sm font-bold text-slate-900">
                               Selected Files ({uploadFiles.length})
                             </h4>
-                            {totalSavedBytes > 0 && (
+                            {isUploading && (
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-800 animate-pulse">
+                                Direct Drive Streaming (2x Parallel)
+                              </span>
+                            )}
+                            {totalSavedBytes > 0 && !isUploading && (
                               <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
                                 Saved {totalSavedMB} MB with Turbo ⚡
                               </span>
                             )}
                           </div>
-                          <p className="text-[11px] text-slate-500 mt-0.5">
-                            Total payload: <strong className="text-slate-800">{formatFileSize(totalUploadBytes)}</strong> {totalSavedBytes > 0 ? `(reduced from ${formatFileSize(totalOriginalBytes)})` : ''}
+                          <p className="text-xs text-slate-500 mt-1">
+                            Queue: <strong className="text-slate-800">{completedCount}/{uploadFiles.length} files</strong> ({formatFileSize(totalQueueLoadedBytes)} of {formatFileSize(totalQueueBytes)})
+                            {activeSpeed && activeSpeed > 0 ? ` • ${formatSpeed(activeSpeed)}` : ''}
                           </p>
+                          {isUploading && (
+                            <div className="mt-2 max-w-md w-full bg-slate-100 rounded-full h-2 overflow-hidden border border-slate-200">
+                              <div
+                                className="bg-red-600 h-2 rounded-full transition-all duration-200"
+                                style={{ width: `${overallQueuePercent}%` }}
+                              />
+                            </div>
+                          )}
                         </div>
 
-                        <div className="flex items-center gap-2 self-start sm:self-auto">
+                        <div className="flex items-center gap-2 self-start sm:self-auto shrink-0">
                           <button
                             onClick={() => setUploadFiles([])}
                             disabled={isUploading}
@@ -1085,9 +1150,21 @@ export const FieldCrewPortalPage: React.FC = () => {
                                     )}
                                   </div>
                                 ) : item.status === 'UPLOADING' ? (
-                                  <div className="flex items-center gap-1.5 text-xs font-bold text-red-600">
-                                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                                    <span>{item.progress}%</span>
+                                  <div className="flex flex-col items-end gap-0.5">
+                                    <div className="flex items-center gap-1.5 text-xs font-bold text-red-600">
+                                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                      <span>{item.progress}%</span>
+                                      {item.speedBytesPerSec && item.speedBytesPerSec > 0 && (
+                                        <span className="text-[10px] font-semibold text-slate-600 bg-slate-100 px-1.5 py-0.2 rounded">
+                                          {formatSpeed(item.speedBytesPerSec)}
+                                        </span>
+                                      )}
+                                    </div>
+                                    {item.loadedBytes !== undefined && (
+                                      <span className="text-[10px] text-slate-500 font-mono">
+                                        {formatFileSize(item.loadedBytes)} / {formatFileSize(item.totalBytes || item.file.size)}
+                                      </span>
+                                    )}
                                   </div>
                                 ) : item.status === 'FAILED' ? (
                                   <span className="text-xs font-bold text-red-600 flex items-center gap-1" title={item.error}>
