@@ -72,6 +72,16 @@ describe('DSA MediaVerse AI — Extreme End-to-End Testing & Security Suite', ()
   afterAll(async () => {
     // Phase 20: Safe cleanup of test records tagged with TEST_RUN_ID
     console.log(`[CLEANUP] Cleaning up test records for ${TEST_RUN_ID}...`);
+    if (testAssignmentId) {
+      try {
+        await apiCall(`/assignments/${testAssignmentId}`, {
+          method: 'DELETE',
+          userId: PROFILES.COORDINATOR
+        });
+      } catch (err) {
+        // Ignore background delete errors
+      }
+    }
     db.assignments = db.assignments.filter(a => !a.title.includes(TEST_RUN_ID));
     db.mediaAssets = db.mediaAssets.filter(m => !m.filename.includes(TEST_RUN_ID));
     db.editingProjects = db.editingProjects.filter(p => !p.title.includes(TEST_RUN_ID));
