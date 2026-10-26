@@ -662,7 +662,7 @@ export const FieldCrewPortalPage: React.FC = () => {
                       ref={fileInputRef}
                       type="file"
                       multiple
-                      accept="image/*,video/*,audio/*"
+                      accept="image/*,video/*,audio/*,.cr2,.cr3,.nef,.arw,.dng,.raw,.heic,.raf"
                       onChange={handleFilesSelected}
                       className="hidden"
                     />
