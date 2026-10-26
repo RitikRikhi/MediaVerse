@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Outlet } from 'react-router-dom';
 import { Navbar } from './Navbar';
 import { Sidebar } from './Sidebar';
+import { MobileBottomNav } from './MobileBottomNav';
 
 export const Layout: React.FC = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -13,12 +14,14 @@ export const Layout: React.FC = () => {
       <div className="flex-1 flex">
         <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
-        <main className="flex-1 lg:pl-60 flex flex-col overflow-x-hidden min-h-[calc(100vh-4rem)] min-w-0 w-full">
+        <main className="flex-1 lg:pl-60 flex flex-col overflow-x-hidden min-h-[calc(100vh-4rem)] min-w-0 w-full pb-20 lg:pb-6">
           <div className="flex-1 p-3 sm:p-5 lg:p-6 max-w-7xl w-full mx-auto min-w-0">
             <Outlet />
           </div>
         </main>
       </div>
+
+      <MobileBottomNav />
     </div>
   );
 };
