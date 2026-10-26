@@ -65,7 +65,7 @@ if (process.env.NODE_ENV !== 'test') {
     console.warn('[SupabaseService] Startup hydration error:', err);
   });
 
-  app.listen(config.port, () => {
+  app.listen(config.port, '0.0.0.0', () => {
     console.log(`=======================================================`);
     console.log(`🎬 DSA MediaVerse AI Backend Server Running`);
     console.log(`📍 Port: ${config.port}`);
