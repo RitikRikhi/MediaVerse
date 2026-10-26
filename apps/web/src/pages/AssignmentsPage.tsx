@@ -17,6 +17,7 @@ import {
   Trash2,
   Camera,
   Video,
+  Film,
   Layers,
   Phone,
   Mail,
@@ -145,12 +146,27 @@ const TASK_TEMPLATES: TaskTemplate[] = [
 ];
 
 export const AssignmentsPage: React.FC = () => {
-  const { isCoordinator, isSuperAdmin, allUsers } = useAuth();
+  const { isCoordinator, isSuperAdmin, isPhotographer, isVideographer, isEditor, activeRole, allUsers } = useAuth();
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [filteredAssignments, setFilteredAssignments] = useState<Assignment[]>([]);
   const [selectedAssignment, setSelectedAssignment] = useState<(Assignment & { checklist: ShotChecklistItem[] }) | null>(null);
   const [activeDetailTab, setActiveDetailTab] = useState<'shotlist' | 'specs' | 'crew' | 'storage'>('shotlist');
   const [isLoading, setIsLoading] = useState(true);
+
+  // Role Lens Filter: 'ALL' | 'PHOTOGRAPHY' | 'VIDEOGRAPHY' | 'EDITING'
+  const getInitialLens = (): 'ALL' | 'PHOTOGRAPHY' | 'VIDEOGRAPHY' | 'EDITING' => {
+    if (activeRole === 'PHOTOGRAPHER' || isPhotographer) return 'PHOTOGRAPHY';
+    if (activeRole === 'VIDEOGRAPHER' || isVideographer) return 'VIDEOGRAPHY';
+    if (activeRole === 'VIDEO_EDITOR' || isEditor) return 'EDITING';
+    return 'ALL';
+  };
+
+  const [roleLens, setRoleLens] = useState<'ALL' | 'PHOTOGRAPHY' | 'VIDEOGRAPHY' | 'EDITING'>(getInitialLens);
+
+  // Auto-sync lens when activeRole changes (e.g. switched in Navbar)
+  useEffect(() => {
+    setRoleLens(getInitialLens());
+  }, [activeRole]);
 
   // Filters
   const [search, setSearch] = useState('');
@@ -175,6 +191,7 @@ export const AssignmentsPage: React.FC = () => {
   const [isAddingShot, setIsAddingShot] = useState(false);
 
   // Create form state
+  const [templateRoleFilter, setTemplateRoleFilter] = useState<'ALL' | 'PHOTOGRAPHY' | 'VIDEOGRAPHY'>('ALL');
   const [formTitle, setFormTitle] = useState('');
   const [formCoverage, setFormCoverage] = useState<CoverageType>('PHOTOGRAPHY');
   const [formPriority, setFormPriority] = useState<PriorityLevel>('HIGH');
@@ -208,9 +225,22 @@ export const AssignmentsPage: React.FC = () => {
     loadAssignments();
   }, []);
 
-  // Filter effect
+  // Filter effect including Role Lens
   useEffect(() => {
     let result = [...assignments];
+
+    // 1. Role Lens Filter
+    if (roleLens === 'PHOTOGRAPHY') {
+      result = result.filter(a => a.coverage_type === 'PHOTOGRAPHY' || a.coverage_type === 'HYBRID');
+    } else if (roleLens === 'VIDEOGRAPHY') {
+      result = result.filter(a => a.coverage_type === 'VIDEOGRAPHY' || a.coverage_type === 'HYBRID');
+    } else if (roleLens === 'EDITING') {
+      result = result.filter(
+        a => a.coverage_type === 'VIDEOGRAPHY' || a.status.includes('EDIT') || a.priority === 'CRITICAL'
+      );
+    }
+
+    // 2. Search query
     if (search.trim()) {
       const q = search.toLowerCase();
       result = result.filter(
@@ -221,17 +251,24 @@ export const AssignmentsPage: React.FC = () => {
           (a.notes && a.notes.toLowerCase().includes(q))
       );
     }
+
+    // 3. Status filter
     if (statusFilter !== 'ALL') {
       result = result.filter(a => a.status === statusFilter);
     }
+
+    // 4. Coverage filter
     if (coverageFilter !== 'ALL') {
       result = result.filter(a => a.coverage_type === coverageFilter);
     }
+
+    // 5. Priority filter
     if (priorityFilter !== 'ALL') {
       result = result.filter(a => a.priority === priorityFilter);
     }
+
     setFilteredAssignments(result);
-  }, [assignments, search, statusFilter, coverageFilter, priorityFilter]);
+  }, [assignments, roleLens, search, statusFilter, coverageFilter, priorityFilter]);
 
   const handleOpenDetail = async (id: string, defaultTab: 'shotlist' | 'specs' | 'crew' | 'storage' = 'shotlist') => {
     try {
@@ -467,6 +504,127 @@ export const AssignmentsPage: React.FC = () => {
           </Link>
         </div>
       </div>
+
+      {/* Role-Specific Focus Lens Switcher */}
+      <div className="p-3.5 sm:p-4 rounded-2xl bg-white border border-slate-200 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center shrink-0">
+            <SlidersHorizontal className="w-4 h-4 text-red-600" />
+          </div>
+          <div>
+            <h3 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+              Role Focus Lens
+              <span className="text-[10px] font-bold text-red-700 bg-red-50 px-1.5 py-0.2 rounded border border-red-200">
+                ROLE-SPECIFIC
+              </span>
+            </h3>
+            <p className="text-[11px] text-slate-500">
+              Isolates only the tasks, camera settings, and deliverables specific to your role.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
+          <button
+            onClick={() => setRoleLens('PHOTOGRAPHY')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+              roleLens === 'PHOTOGRAPHY'
+                ? 'bg-red-600 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-white/80'
+            }`}
+          >
+            <Camera className="w-3.5 h-3.5" />
+            <span>📸 Photographer (Photos Only)</span>
+          </button>
+
+          <button
+            onClick={() => setRoleLens('VIDEOGRAPHY')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+              roleLens === 'VIDEOGRAPHY'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-white/80'
+            }`}
+          >
+            <Video className="w-3.5 h-3.5" />
+            <span>🎥 Videographer (Videos Only)</span>
+          </button>
+
+          <button
+            onClick={() => setRoleLens('EDITING')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+              roleLens === 'EDITING'
+                ? 'bg-purple-600 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-white/80'
+            }`}
+          >
+            <Film className="w-3.5 h-3.5" />
+            <span>🎬 Video Editor</span>
+          </button>
+
+          <button
+            onClick={() => setRoleLens('ALL')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+              roleLens === 'ALL'
+                ? 'bg-slate-900 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-white/80'
+            }`}
+          >
+            <span>🌐 All Operations ({assignments.length})</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Role-Specific Context Alert Banner */}
+      {roleLens === 'PHOTOGRAPHY' && (
+        <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-emerald-900 animate-fade-in">
+          <div className="flex items-center gap-2">
+            <Camera className="w-4 h-4 text-emerald-700 shrink-0" />
+            <span>
+              <strong>📸 Photographer Focus Active:</strong> Showing only Still Photography tasks, camera RAW specs, and photo shotlists. Video multi-cam, sound stems, and editing clutter are hidden.
+            </span>
+          </div>
+          <button
+            onClick={() => setRoleLens('ALL')}
+            className="text-xs font-bold text-emerald-800 hover:text-emerald-950 underline shrink-0 cursor-pointer text-left sm:text-right"
+          >
+            Show All Operations ({assignments.length})
+          </button>
+        </div>
+      )}
+
+      {roleLens === 'VIDEOGRAPHY' && (
+        <div className="p-3.5 rounded-xl bg-blue-50 border border-blue-200 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-blue-900 animate-fade-in">
+          <div className="flex items-center gap-2">
+            <Video className="w-4 h-4 text-blue-700 shrink-0" />
+            <span>
+              <strong>🎥 Videographer Focus Active:</strong> Showing only 4K Multi-Cam, Gimbal, and Audio capture tasks. Still-only photography tasks are hidden so you can focus on motion & sound.
+            </span>
+          </div>
+          <button
+            onClick={() => setRoleLens('ALL')}
+            className="text-xs font-bold text-blue-800 hover:text-blue-950 underline shrink-0 cursor-pointer text-left sm:text-right"
+          >
+            Show All Operations ({assignments.length})
+          </button>
+        </div>
+      )}
+
+      {roleLens === 'EDITING' && (
+        <div className="p-3.5 rounded-xl bg-purple-50 border border-purple-200 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-purple-900 animate-fade-in">
+          <div className="flex items-center gap-2">
+            <Film className="w-4 h-4 text-purple-700 shrink-0" />
+            <span>
+              <strong>🎬 Video Editor Focus Active:</strong> Showing video projects, raw footage handoffs, 9:16 vertical reels, and post-production milestones.
+            </span>
+          </div>
+          <button
+            onClick={() => setRoleLens('ALL')}
+            className="text-xs font-bold text-purple-800 hover:text-purple-950 underline shrink-0 cursor-pointer text-left sm:text-right"
+          >
+            Show All Operations ({assignments.length})
+          </button>
+        </div>
+      )}
 
       {/* 4 Summary Stat Pills */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -908,7 +1066,62 @@ export const AssignmentsPage: React.FC = () => {
 
             {/* TAB 2: Camera & Gear Specs */}
             {activeDetailTab === 'specs' && (
-              <div className="space-y-3">
+              <div className="space-y-4">
+                {/* Role-Specific Quick Guidelines */}
+                {(selectedAssignment.coverage_type === 'PHOTOGRAPHY' || selectedAssignment.coverage_type === 'HYBRID') && (
+                  <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 space-y-2">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-900">
+                      <Camera className="w-4 h-4 text-emerald-700" />
+                      <span>📸 Still Photography Camera Specs (Photographer Guide)</span>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+                      <div className="p-2 rounded-lg bg-white border border-emerald-100">
+                        <span className="text-slate-500 font-semibold block">Glass / Lenses</span>
+                        <span className="font-bold text-slate-800">24-70mm & 70-200mm f/2.8</span>
+                      </div>
+                      <div className="p-2 rounded-lg bg-white border border-emerald-100">
+                        <span className="text-slate-500 font-semibold block">Shutter Speed</span>
+                        <span className="font-bold text-slate-800">1/250s min (1/500s Action)</span>
+                      </div>
+                      <div className="p-2 rounded-lg bg-white border border-emerald-100">
+                        <span className="text-slate-500 font-semibold block">ISO Sensitivity</span>
+                        <span className="font-bold text-slate-800">Auto (Cap at 3200)</span>
+                      </div>
+                      <div className="p-2 rounded-lg bg-white border border-emerald-100">
+                        <span className="text-slate-500 font-semibold block">File Format</span>
+                        <span className="font-bold text-slate-800">Dual RAW + Fine JPEG</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {(selectedAssignment.coverage_type === 'VIDEOGRAPHY' || selectedAssignment.coverage_type === 'HYBRID') && (
+                  <div className="p-3.5 rounded-xl bg-blue-50 border border-blue-200 space-y-2">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-blue-900">
+                      <Video className="w-4 h-4 text-blue-700" />
+                      <span>🎥 4K Videography & Multi-Cam Specs (Videographer Guide)</span>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+                      <div className="p-2 rounded-lg bg-white border border-blue-100">
+                        <span className="text-slate-500 font-semibold block">Resolution & FPS</span>
+                        <span className="font-bold text-slate-800">4K 60fps (120fps Slow-Mo)</span>
+                      </div>
+                      <div className="p-2 rounded-lg bg-white border border-blue-100">
+                        <span className="text-slate-500 font-semibold block">Shutter Rule</span>
+                        <span className="font-bold text-slate-800">180° Angle (1/120s)</span>
+                      </div>
+                      <div className="p-2 rounded-lg bg-white border border-blue-100">
+                        <span className="text-slate-500 font-semibold block">Color Profile</span>
+                        <span className="font-bold text-slate-800">S-Log3 / C-Log 10-bit</span>
+                      </div>
+                      <div className="p-2 rounded-lg bg-white border border-blue-100">
+                        <span className="text-slate-500 font-semibold block">Audio Capture</span>
+                        <span className="font-bold text-slate-800">FOH XLR to Zoom H6 (-12dB)</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {selectedAssignment.notes ? (
                   <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-800 font-mono whitespace-pre-wrap leading-relaxed">
                     {selectedAssignment.notes}
@@ -1125,29 +1338,67 @@ export const AssignmentsPage: React.FC = () => {
           maxWidth="2xl"
         >
           <form onSubmit={handleCreateAssignment} className="space-y-4">
-            {/* Quick Template Selector */}
-            <div className="space-y-2 p-3.5 rounded-xl bg-slate-50 border border-slate-200">
-              <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
-                <Zap className="w-3.5 h-3.5 text-amber-500" />
-                <span>Quick-Fill from Event Template (1-Tap Fast Fill)</span>
+            {/* Quick Template Selector with Target Role Filter */}
+            <div className="space-y-2.5 p-3.5 rounded-xl bg-slate-50 border border-slate-200">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
+                  <Zap className="w-3.5 h-3.5 text-amber-500" />
+                  <span>Role-Specific Event Templates (1-Tap Fill)</span>
+                </div>
+                <div className="flex items-center gap-1 bg-white p-0.5 rounded-lg border border-slate-200 text-[10px] font-bold">
+                  <button
+                    type="button"
+                    onClick={() => setTemplateRoleFilter('ALL')}
+                    className={`px-2 py-0.5 rounded transition-colors ${
+                      templateRoleFilter === 'ALL' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    All
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTemplateRoleFilter('PHOTOGRAPHY')}
+                    className={`px-2 py-0.5 rounded transition-colors ${
+                      templateRoleFilter === 'PHOTOGRAPHY' ? 'bg-red-600 text-white' : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    📸 Photo
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTemplateRoleFilter('VIDEOGRAPHY')}
+                    className={`px-2 py-0.5 rounded transition-colors ${
+                      templateRoleFilter === 'VIDEOGRAPHY' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    🎥 Video
+                  </button>
+                </div>
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                {TASK_TEMPLATES.map((tmpl, idx) => (
-                  <button
-                    key={idx}
-                    type="button"
-                    onClick={() => handleApplyTemplate(tmpl)}
-                    className="p-2.5 rounded-xl bg-white border border-slate-200 hover:border-red-400 hover:bg-red-50/50 text-left transition-all group"
-                  >
-                    <span className="text-base mr-1">{tmpl.icon}</span>
-                    <span className="text-[11px] font-bold text-slate-800 group-hover:text-red-700 block">
-                      {tmpl.name}
-                    </span>
-                    <span className="text-[10px] text-slate-400 uppercase tracking-wider block">
-                      {tmpl.category}
-                    </span>
-                  </button>
-                ))}
+                {TASK_TEMPLATES
+                  .filter(
+                    tmpl =>
+                      templateRoleFilter === 'ALL' ||
+                      tmpl.category === templateRoleFilter ||
+                      tmpl.category === 'HYBRID'
+                  )
+                  .map((tmpl, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => handleApplyTemplate(tmpl)}
+                      className="p-2.5 rounded-xl bg-white border border-slate-200 hover:border-red-400 hover:bg-red-50/50 text-left transition-all group"
+                    >
+                      <span className="text-base mr-1">{tmpl.icon}</span>
+                      <span className="text-[11px] font-bold text-slate-800 group-hover:text-red-700 block">
+                        {tmpl.name}
+                      </span>
+                      <span className="text-[10px] text-slate-400 uppercase tracking-wider block">
+                        {tmpl.category}
+                      </span>
+                    </button>
+                  ))}
               </div>
             </div>
 

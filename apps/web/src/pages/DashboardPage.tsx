@@ -22,11 +22,24 @@ import {
 import { Link } from 'react-router-dom';
 
 export const DashboardPage: React.FC = () => {
-  const { user, isCoordinator, isSuperAdmin, isPresident } = useAuth();
+  const { user, activeRole, isCoordinator, isSuperAdmin, isPresident, isPhotographer, isVideographer, isEditor } = useAuth();
   const [metrics, setMetrics] = useState<CoordinatorMetrics | null>(null);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [activeDay, setActiveDay] = useState<'DAY_1' | 'DAY_2'>('DAY_1');
+  
+  const initialRoleFilter = (activeRole === 'PHOTOGRAPHER' || isPhotographer)
+    ? 'PHOTO'
+    : (activeRole === 'VIDEOGRAPHER' || isVideographer)
+    ? 'VIDEO'
+    : 'ALL';
+  const [roleFilter, setRoleFilter] = useState<'ALL' | 'PHOTO' | 'VIDEO'>(initialRoleFilter);
   const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    if (activeRole === 'PHOTOGRAPHER' || isPhotographer) setRoleFilter('PHOTO');
+    else if (activeRole === 'VIDEOGRAPHER' || isVideographer) setRoleFilter('VIDEO');
+    else setRoleFilter('ALL');
+  }, [activeRole]);
 
   const loadDashboardData = async () => {
     try {
@@ -49,8 +62,11 @@ export const DashboardPage: React.FC = () => {
   }, [user]);
 
   const filteredTasks = assignments.filter(a => {
-    if (activeDay === 'DAY_1') return /day\s*1/i.test(a.day_session);
-    return /day\s*2/i.test(a.day_session);
+    const matchDay = activeDay === 'DAY_1' ? /day\s*1/i.test(a.day_session) : /day\s*2/i.test(a.day_session);
+    if (!matchDay) return false;
+    if (roleFilter === 'PHOTO' && a.coverage_type !== 'PHOTOGRAPHY' && a.coverage_type !== 'HYBRID') return false;
+    if (roleFilter === 'VIDEO' && a.coverage_type !== 'VIDEOGRAPHY' && a.coverage_type !== 'HYBRID') return false;
+    return true;
   });
 
   if (isLoading && !metrics) {
@@ -77,7 +93,13 @@ export const DashboardPage: React.FC = () => {
             Hi, {user?.full_name?.split(' ')[0] || 'Crew Member'}! 👋
           </h1>
           <p className="text-xs sm:text-sm text-slate-600 max-w-xl">
-            Choose what you need to do below. All photos and 4K footage automatically sync to the official Google Drive.
+            {activeRole === 'PHOTOGRAPHER'
+              ? '📸 Still Photographer Hub: Focused on your photo shotlists, camera RAW gear guidelines, and direct Drive photo sync.'
+              : activeRole === 'VIDEOGRAPHER'
+              ? '🎥 Videographer & Multi-Cam Hub: Focused on 4K 60fps stage coverage, soundboard WAV stems, and video footage sync.'
+              : activeRole === 'VIDEO_EDITOR'
+              ? '🎬 Video Editor Suite: Focused on reel assembly, 9:16 vs 16:9 deliverables, version submissions, and director reviews.'
+              : 'Choose what you need to do below. All photos and 4K footage automatically sync to the official Google Drive.'}
           </p>
         </div>
 
@@ -230,24 +252,57 @@ export const DashboardPage: React.FC = () => {
             <p className="text-xs text-slate-500">Tap any event to view briefing or upload files immediately.</p>
           </div>
 
-          {/* Day 1 / Day 2 Switcher */}
-          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs font-bold self-start sm:self-auto">
-            <button
-              onClick={() => setActiveDay('DAY_1')}
-              className={`px-3 py-1.5 rounded-lg transition-colors ${
-                activeDay === 'DAY_1' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Day 1 (Oct 28)
-            </button>
-            <button
-              onClick={() => setActiveDay('DAY_2')}
-              className={`px-3 py-1.5 rounded-lg transition-colors ${
-                activeDay === 'DAY_2' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Day 2 (Oct 29)
-            </button>
+          {/* Day & Role Filters */}
+          <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+            {/* Role Filter Switcher */}
+            <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs font-bold">
+              <button
+                onClick={() => setRoleFilter('PHOTO')}
+                className={`px-2.5 py-1.5 rounded-lg transition-colors flex items-center gap-1 ${
+                  roleFilter === 'PHOTO' ? 'bg-red-600 text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Camera className="w-3 h-3" />
+                <span>📸 Photos Only</span>
+              </button>
+              <button
+                onClick={() => setRoleFilter('VIDEO')}
+                className={`px-2.5 py-1.5 rounded-lg transition-colors flex items-center gap-1 ${
+                  roleFilter === 'VIDEO' ? 'bg-blue-600 text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Film className="w-3 h-3" />
+                <span>🎥 Videos Only</span>
+              </button>
+              <button
+                onClick={() => setRoleFilter('ALL')}
+                className={`px-2.5 py-1.5 rounded-lg transition-colors ${
+                  roleFilter === 'ALL' ? 'bg-slate-900 text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                All
+              </button>
+            </div>
+
+            {/* Day 1 / Day 2 Switcher */}
+            <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs font-bold">
+              <button
+                onClick={() => setActiveDay('DAY_1')}
+                className={`px-3 py-1.5 rounded-lg transition-colors ${
+                  activeDay === 'DAY_1' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Day 1 (Oct 28)
+              </button>
+              <button
+                onClick={() => setActiveDay('DAY_2')}
+                className={`px-3 py-1.5 rounded-lg transition-colors ${
+                  activeDay === 'DAY_2' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Day 2 (Oct 29)
+              </button>
+            </div>
           </div>
         </div>
 

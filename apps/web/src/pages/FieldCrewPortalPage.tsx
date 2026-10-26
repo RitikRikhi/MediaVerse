@@ -46,11 +46,24 @@ interface QueuedFile {
 }
 
 export const FieldCrewPortalPage: React.FC = () => {
-  const { user, setShowAuthModal } = useAuth();
+  const { user, activeRole, isPhotographer, isVideographer, setShowAuthModal } = useAuth();
   const [myAssignments, setMyAssignments] = useState<Assignment[]>([]);
   const [selectedAssignment, setSelectedAssignment] = useState<(Assignment & { checklist: ShotChecklistItem[] }) | null>(null);
   const [assignedMedia, setAssignedMedia] = useState<MediaAsset[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Role Station Filter: 'PHOTO' | 'VIDEO' | 'ALL'
+  const getInitialMediaFilter = (): 'PHOTO' | 'VIDEO' | 'ALL' => {
+    if (activeRole === 'PHOTOGRAPHER' || isPhotographer) return 'PHOTO';
+    if (activeRole === 'VIDEOGRAPHER' || isVideographer) return 'VIDEO';
+    return 'ALL';
+  };
+
+  const [roleMediaFilter, setRoleMediaFilter] = useState<'PHOTO' | 'VIDEO' | 'ALL'>(getInitialMediaFilter);
+
+  useEffect(() => {
+    setRoleMediaFilter(getInitialMediaFilter());
+  }, [activeRole]);
 
   // Active view tab inside the workspace: 'upload' | 'checklist' | 'media'
   const [activeTab, setActiveTab] = useState<'upload' | 'checklist' | 'media'>('upload');
@@ -377,12 +390,21 @@ export const FieldCrewPortalPage: React.FC = () => {
   const totalShotsCount = selectedAssignment?.checklist?.length || 0;
   const checklistProgressPercent = totalShotsCount > 0 ? Math.round((completedShotsCount / totalShotsCount) * 100) : 0;
 
-  // Filtered task list
+  // Filtered task list including role station
   const filteredAssignments = myAssignments.filter(a => {
-    if (dayFilter === 'DAY_1') return /day\s*1/i.test(a.day_session);
-    if (dayFilter === 'DAY_2') return /day\s*2/i.test(a.day_session);
+    if (dayFilter === 'DAY_1' && !/day\s*1/i.test(a.day_session)) return false;
+    if (dayFilter === 'DAY_2' && !/day\s*2/i.test(a.day_session)) return false;
+    if (roleMediaFilter === 'PHOTO' && a.coverage_type !== 'PHOTOGRAPHY' && a.coverage_type !== 'HYBRID') return false;
+    if (roleMediaFilter === 'VIDEO' && a.coverage_type !== 'VIDEOGRAPHY' && a.coverage_type !== 'HYBRID') return false;
     return true;
   });
+
+  const acceptedFileExtensions =
+    roleMediaFilter === 'PHOTO'
+      ? 'image/*,.cr2,.cr3,.nef,.arw,.dng,.raw,.heic,.raf'
+      : roleMediaFilter === 'VIDEO'
+      ? 'video/*,audio/*,.mp4,.mov,.mkv,.prores,.wav,.aac,.m4a'
+      : 'image/*,video/*,audio/*,.cr2,.cr3,.nef,.arw,.dng,.raw,.heic,.raf,.mp4,.mov,.wav';
 
   return (
     <div className="space-y-6 animate-fade-in max-w-7xl mx-auto pb-12">
@@ -421,6 +443,97 @@ export const FieldCrewPortalPage: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Role-Specific Media Station Switcher */}
+      <div className="p-3.5 sm:p-4 rounded-2xl bg-white border border-slate-200 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center shrink-0">
+            <Zap className="w-4 h-4 text-red-600" />
+          </div>
+          <div>
+            <h3 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+              Role Media Station
+              <span className="text-[10px] font-bold text-red-700 bg-red-50 px-1.5 py-0.2 rounded border border-red-200">
+                ROLE-ISOLATED
+              </span>
+            </h3>
+            <p className="text-[11px] text-slate-500">
+              Only accepts files and target folders matching your specific role.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
+          <button
+            onClick={() => setRoleMediaFilter('PHOTO')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+              roleMediaFilter === 'PHOTO'
+                ? 'bg-red-600 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-white/80'
+            }`}
+          >
+            <Camera className="w-3.5 h-3.5" />
+            <span>📸 Photographer Station (Photos & RAWs)</span>
+          </button>
+
+          <button
+            onClick={() => setRoleMediaFilter('VIDEO')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+              roleMediaFilter === 'VIDEO'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-white/80'
+            }`}
+          >
+            <Film className="w-3.5 h-3.5" />
+            <span>🎥 Videographer Station (4K Video & Stems)</span>
+          </button>
+
+          <button
+            onClick={() => setRoleMediaFilter('ALL')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+              roleMediaFilter === 'ALL'
+                ? 'bg-slate-900 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-white/80'
+            }`}
+          >
+            <span>🌐 All Media Formats</span>
+          </button>
+        </div>
+      </div>
+
+      {roleMediaFilter === 'PHOTO' && (
+        <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-emerald-900 animate-fade-in">
+          <div className="flex items-center gap-2">
+            <Camera className="w-4 h-4 text-emerald-700 shrink-0" />
+            <span>
+              <strong>📸 Photographer Mode Active:</strong> Only accepting Camera JPEGs and DSLR RAWs (Canon CR2/CR3, Nikon NEF, Sony ARW, DNG). Auto-routes to <code>Day X / Photography</code> on Google Drive.
+            </span>
+          </div>
+          <button
+            onClick={() => setRoleMediaFilter('ALL')}
+            className="text-xs font-bold text-emerald-800 hover:text-emerald-950 underline shrink-0 cursor-pointer text-left sm:text-right"
+          >
+            Show All Media Formats
+          </button>
+        </div>
+      )}
+
+      {roleMediaFilter === 'VIDEO' && (
+        <div className="p-3.5 rounded-xl bg-blue-50 border border-blue-200 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-blue-900 animate-fade-in">
+          <div className="flex items-center gap-2">
+            <Film className="w-4 h-4 text-blue-700 shrink-0" />
+            <span>
+              <strong>🎥 Videographer Mode Active:</strong> Only accepting 4K 60fps/120fps video clips and Zoom H6 audio WAV stems. Auto-routes to <code>Day X / Raw Videography</code> on Google Drive.
+            </span>
+          </div>
+          <button
+            onClick={() => setRoleMediaFilter('ALL')}
+            className="text-xs font-bold text-blue-800 hover:text-blue-950 underline shrink-0 cursor-pointer text-left sm:text-right"
+          >
+            Show All Media Formats
+          </button>
+        </div>
+      )}
 
       {/* Auth Success Toast */}
       {authSuccessBanner && (
@@ -662,25 +775,43 @@ export const FieldCrewPortalPage: React.FC = () => {
                       ref={fileInputRef}
                       type="file"
                       multiple
-                      accept="image/*,video/*,audio/*,.cr2,.cr3,.nef,.arw,.dng,.raw,.heic,.raf"
+                      accept={acceptedFileExtensions}
                       onChange={handleFilesSelected}
                       className="hidden"
                     />
 
                     <div className="w-14 h-14 rounded-2xl bg-red-100 text-red-600 flex items-center justify-center mx-auto mb-3 group-hover:scale-110 transition-transform">
-                      <UploadCloud className="w-7 h-7" />
+                      {roleMediaFilter === 'PHOTO' ? (
+                        <Camera className="w-7 h-7" />
+                      ) : roleMediaFilter === 'VIDEO' ? (
+                        <Film className="w-7 h-7" />
+                      ) : (
+                        <UploadCloud className="w-7 h-7" />
+                      )}
                     </div>
 
                     <h3 className="text-base font-bold text-slate-900 group-hover:text-red-700 transition-colors">
-                      Drop Photos or 4K Video Clips Here
+                      {roleMediaFilter === 'PHOTO'
+                        ? 'Drop DSLR Photos or RAWs Here'
+                        : roleMediaFilter === 'VIDEO'
+                        ? 'Drop 4K Video Clips or Soundboard WAV Stems Here'
+                        : 'Drop Photos or 4K Video Clips Here'}
                     </h3>
                     <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
-                      Tap or drag camera files from your SD card or phone. Supports JPEG, PNG, Sony/Canon RAW, MP4, and MOV files.
+                      {roleMediaFilter === 'PHOTO'
+                        ? 'Tap or drag camera files from your SD card. Supports Canon CR2/CR3, Nikon NEF, Sony ARW, DNG, and JPEG.'
+                        : roleMediaFilter === 'VIDEO'
+                        ? 'Tap or drag high-bitrate footage. Supports 4K MP4, MOV, ProRes, and Zoom H6 WAV audio stems.'
+                        : 'Tap or drag camera files from your SD card or phone. Supports JPEG, PNG, RAW, MP4, and MOV files.'}
                     </p>
 
                     <div className="mt-4 flex items-center justify-center gap-2">
                       <span className="px-4 py-2 rounded-xl text-xs font-bold bg-red-600 group-hover:bg-red-700 text-white shadow-xs transition-colors">
-                        Choose Files from Device
+                        {roleMediaFilter === 'PHOTO'
+                          ? 'Select Photo Files'
+                          : roleMediaFilter === 'VIDEO'
+                          ? 'Select Video & Audio Files'
+                          : 'Choose Files from Device'}
                       </span>
                     </div>
                   </div>

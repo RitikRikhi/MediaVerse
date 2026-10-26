@@ -20,33 +20,45 @@ interface SidebarProps {
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
-  const { isCoordinator, isFieldCrew, isEditor, isReviewer, isPresident, isSuperAdmin } = useAuth();
+  const { isCoordinator, isFieldCrew, isEditor, isReviewer, isPresident, isSuperAdmin, isPhotographer, isVideographer, activeRole } = useAuth();
+
+  const isPurePhotographer = (activeRole === 'PHOTOGRAPHER' || isPhotographer) && !isCoordinator && !isSuperAdmin;
+  const isPureVideographer = (activeRole === 'VIDEOGRAPHER' || isVideographer) && !isCoordinator && !isSuperAdmin;
 
   const navItems = [
     {
       to: '/',
-      label: 'Home / Workspace',
+      label: 'Home / Launchpad',
       icon: LayoutDashboard,
       show: true
     },
     {
       to: '/assignments',
-      label: 'Assignments',
+      label: isPurePhotographer
+        ? 'Photo Assignments'
+        : isPureVideographer
+        ? 'Video Tasks'
+        : 'Event Tasks',
       icon: ClipboardList,
-      show: true
+      show: true,
+      badge: isPurePhotographer ? '📸 Photos' : isPureVideographer ? '🎥 4K' : undefined
     },
     {
       to: '/field-crew',
-      label: 'Upload Media',
+      label: isPurePhotographer
+        ? 'Photo Uploader'
+        : isPureVideographer
+        ? 'Video Ingestion'
+        : 'Upload Media',
       icon: UploadCloud,
       show: true,
-      badge: 'Photos / Video'
+      badge: isPurePhotographer ? 'RAW / JPG' : isPureVideographer ? '4K Stems' : 'Photos / Video'
     },
     {
       to: '/editor',
       label: 'Editing Studio',
       icon: Film,
-      show: true,
+      show: !isPurePhotographer, // Hide video editing suite for pure still photographers
       badge: 'Reels / Cuts'
     },
     {
@@ -57,7 +69,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
     },
     {
       to: '/media',
-      label: 'Media Library',
+      label: isPurePhotographer ? 'Photo Library' : 'Media Library',
       icon: FolderSync,
       show: true
     },

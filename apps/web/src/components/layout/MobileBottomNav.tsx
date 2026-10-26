@@ -1,15 +1,20 @@
 import React from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
+import { useAuth } from '../../context/AuthContext';
 import {
   LayoutDashboard,
   UploadCloud,
   ClipboardList,
   Film,
-  FolderOpen
+  FolderOpen,
+  Camera,
+  FolderSync
 } from 'lucide-react';
 
 export const MobileBottomNav: React.FC = () => {
   const location = useLocation();
+  const { isPhotographer, activeRole, isCoordinator } = useAuth();
+  const isPurePhotographer = (activeRole === 'PHOTOGRAPHER' || isPhotographer) && !isCoordinator;
 
   const navItems = [
     {
@@ -20,22 +25,22 @@ export const MobileBottomNav: React.FC = () => {
     },
     {
       to: '/field-crew',
-      label: 'Upload',
-      icon: UploadCloud,
+      label: isPurePhotographer ? 'Photos' : 'Upload',
+      icon: isPurePhotographer ? Camera : UploadCloud,
       isPrimary: true,
       isActive: location.pathname === '/field-crew' || location.pathname === '/upload'
     },
     {
       to: '/assignments',
-      label: 'Tasks',
+      label: isPurePhotographer ? 'Photo Tasks' : 'Tasks',
       icon: ClipboardList,
       isActive: location.pathname === '/assignments'
     },
     {
-      to: '/editor',
-      label: 'Editor',
-      icon: Film,
-      isActive: location.pathname === '/editor'
+      to: isPurePhotographer ? '/media' : '/editor',
+      label: isPurePhotographer ? 'Gallery' : 'Editor',
+      icon: isPurePhotographer ? FolderSync : Film,
+      isActive: isPurePhotographer ? location.pathname === '/media' : location.pathname === '/editor'
     }
   ];
 

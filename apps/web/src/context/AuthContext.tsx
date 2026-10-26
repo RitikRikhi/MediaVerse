@@ -23,6 +23,8 @@ interface AuthContextType {
   isCoordinator: boolean;
   isSuperAdmin: boolean;
   isEditor: boolean;
+  isPhotographer: boolean;
+  isVideographer: boolean;
   isFieldCrew: boolean;
   isReviewer: boolean;
   isPresident: boolean;
@@ -132,8 +134,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const isSuperAdmin = user?.roles.includes('SUPER_ADMIN') ?? false;
   const isCoordinator = hasRole('MEDIA_COORDINATOR', 'SUPER_ADMIN');
-  const isEditor = hasRole('VIDEO_EDITOR', 'SUPER_ADMIN');
-  const isFieldCrew = hasRole('PHOTOGRAPHER', 'VIDEOGRAPHER', 'SUPER_ADMIN');
+  const isEditor = Boolean(activeRole === 'VIDEO_EDITOR' || (!isCoordinator && user?.roles.includes('VIDEO_EDITOR')));
+  const isPhotographer = Boolean(activeRole === 'PHOTOGRAPHER' || (!isCoordinator && user?.roles.includes('PHOTOGRAPHER')));
+  const isVideographer = Boolean(activeRole === 'VIDEOGRAPHER' || (!isCoordinator && user?.roles.includes('VIDEOGRAPHER')));
+  const isFieldCrew = Boolean(isPhotographer || isVideographer || isCoordinator);
   const isReviewer = hasRole('REVIEWER', 'SUPER_ADMIN');
   const isPresident = hasRole('PRESIDENT', 'SUPER_ADMIN');
   const isAuthenticated = Boolean(user && user.id);
@@ -155,6 +159,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isCoordinator,
         isSuperAdmin,
         isEditor,
+        isPhotographer,
+        isVideographer,
         isFieldCrew,
         isReviewer,
         isPresident,
