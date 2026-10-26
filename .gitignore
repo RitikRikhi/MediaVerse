@@ -14,5 +14,7 @@ coverage/
 .turbo/
 *.drive_tokens.json
 .drive_tokens.json
+*.drive_structure.json
+.drive_structure.json
 .registered_users.json
 uploads/

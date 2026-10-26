@@ -188,3 +188,23 @@ export interface CoordinatorMetrics {
   total_registered_assets: number;
   total_active_crew: number;
 }
+
+export interface PersonalSubfolder {
+  id: string;
+  name: string;
+  path: string;
+  driveFolderId: string;
+  driveWebUrl: string;
+  isDefault: boolean;
+  created_at: string;
+}
+
+export interface PersonalDriveInfo {
+  userId: string;
+  userName: string;
+  role: UserRole;
+  personalRootFolderId: string;
+  personalRootFolderUrl: string;
+  personalRootPath: string;
+  subfolders: PersonalSubfolder[];
+}

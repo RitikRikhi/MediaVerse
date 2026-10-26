@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { api } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
-import { Assignment, ShotChecklistItem, MediaType, MediaAsset } from '../types';
+import { Assignment, ShotChecklistItem, MediaType, MediaAsset, PersonalDriveInfo, PersonalSubfolder } from '../types';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { PriorityBadge } from '../components/ui/PriorityBadge';
 import { Modal } from '../components/ui/Modal';
@@ -26,7 +26,12 @@ import {
   RotateCcw,
   ShieldCheck,
   Image as ImageIcon,
-  Check
+  Check,
+  HardDrive,
+  FolderPlus,
+  Edit2,
+  Layers,
+  Plus
 } from 'lucide-react';
 
 interface QueuedFile {
@@ -86,6 +91,16 @@ export const FieldCrewPortalPage: React.FC = () => {
   const [showFolderModal, setShowFolderModal] = useState<boolean>(false);
   const [authSuccessBanner, setAuthSuccessBanner] = useState<boolean>(false);
 
+  // Personal User Drive State & Destination Mode
+  const [personalDrive, setPersonalDrive] = useState<PersonalDriveInfo | null>(null);
+  const [personalDriveLoading, setPersonalDriveLoading] = useState<boolean>(false);
+  const [destinationMode, setDestinationMode] = useState<'OFFICIAL' | 'PERSONAL'>('OFFICIAL');
+  const [showPersonalDriveDrawer, setShowPersonalDriveDrawer] = useState<boolean>(false);
+  const [newSubfolderName, setNewSubfolderName] = useState<string>('');
+  const [isCreatingSubfolder, setIsCreatingSubfolder] = useState<boolean>(false);
+  const [editingSubfolderId, setEditingSubfolderId] = useState<string | null>(null);
+  const [editingSubfolderName, setEditingSubfolderName] = useState<string>('');
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dropzoneRef = useRef<HTMLDivElement>(null);
 
@@ -120,24 +135,31 @@ export const FieldCrewPortalPage: React.FC = () => {
       const dest = await api.getResolvedDestination(detail.day_session, mediaType);
       setDestinationFolderInfo(dest);
 
-      // Match corresponding folder in drive folder hierarchy
-      if (driveFolders.length > 0) {
-        const isDay2 = detail.day_session && /day\s*2/i.test(detail.day_session);
-        const dayStr = isDay2 ? 'Day 2' : 'Day 1';
-        const catStr = detail.coverage_type === 'VIDEOGRAPHY' ? 'Raw Videography' : 'Photography';
-        const match = driveFolders.find(f => f.path.includes(dayStr) && f.path.includes(catStr));
-        if (match) {
-          setSelectedFolderPath(match.path);
-          if (match.driveFolderId) setSelectedFolderId(match.driveFolderId);
-        }
+      // Initialize selected folder from verified drive folder ID if in official mode
+      if (destinationMode === 'OFFICIAL' && dest?.driveFolderId) {
+        setSelectedFolderId(dest.driveFolderId);
+        setSelectedFolderPath(dest.fullPath || dest.folderName);
       }
     } catch (err) {
       console.error('Failed to select assignment', err);
     }
   };
 
+  const loadPersonalDrive = async () => {
+    try {
+      setPersonalDriveLoading(true);
+      const pd = await api.getMyDrive();
+      setPersonalDrive(pd);
+    } catch (err) {
+      console.warn('Could not load personal drive:', err);
+    } finally {
+      setPersonalDriveLoading(false);
+    }
+  };
+
   useEffect(() => {
     loadAssignments();
+    loadPersonalDrive();
 
     const query = new URLSearchParams(window.location.search);
     if (query.get('connected') === 'true') {
@@ -161,6 +183,84 @@ export const FieldCrewPortalPage: React.FC = () => {
       })
       .catch(err => console.error('Failed to load drive folders', err));
   }, [user]);
+
+  const handleSelectOfficialFolder = (folderId: string, folderPath: string) => {
+    setSelectedFolderId(folderId);
+    setSelectedFolderPath(folderPath);
+    setDestinationMode('OFFICIAL');
+  };
+
+  const handleSelectPersonalFolder = (sub: PersonalSubfolder) => {
+    setSelectedFolderId(sub.driveFolderId);
+    setSelectedFolderPath(sub.path);
+    setDestinationMode('PERSONAL');
+  };
+
+  const handleCreatePersonalSubfolder = async () => {
+    if (!newSubfolderName.trim()) return;
+    try {
+      setIsCreatingSubfolder(true);
+      const created = await api.addMyPersonalFolder(newSubfolderName.trim());
+      setPersonalDrive(prev => {
+        if (!prev) return null;
+        return {
+          ...prev,
+          subfolders: [...prev.subfolders, created]
+        };
+      });
+      // Auto-select newly created folder as upload target
+      handleSelectPersonalFolder(created);
+      setNewSubfolderName('');
+    } catch (err: any) {
+      alert(`Failed to create subfolder: ${err.message}`);
+    } finally {
+      setIsCreatingSubfolder(false);
+    }
+  };
+
+  const handleRenamePersonalSubfolder = async (folderId: string) => {
+    if (!editingSubfolderName.trim()) return;
+    try {
+      const updated = await api.renameMyPersonalFolder(folderId, editingSubfolderName.trim());
+      setPersonalDrive(prev => {
+        if (!prev) return null;
+        return {
+          ...prev,
+          subfolders: prev.subfolders.map(s => s.driveFolderId === folderId ? updated : s)
+        };
+      });
+      if (selectedFolderId === folderId) {
+        setSelectedFolderPath(updated.path);
+      }
+      setEditingSubfolderId(null);
+      setEditingSubfolderName('');
+    } catch (err: any) {
+      alert(`Failed to rename folder: ${err.message}`);
+    }
+  };
+
+  const handleDeletePersonalSubfolder = async (folderId: string) => {
+    if (!confirm('Are you sure you want to delete this folder from Google Drive?')) return;
+    try {
+      await api.deleteMyPersonalFolder(folderId);
+      setPersonalDrive(prev => {
+        if (!prev) return null;
+        return {
+          ...prev,
+          subfolders: prev.subfolders.filter(s => s.driveFolderId !== folderId)
+        };
+      });
+      if (selectedFolderId === folderId) {
+        if (destinationFolderInfo?.driveFolderId) {
+          setSelectedFolderId(destinationFolderInfo.driveFolderId);
+          setSelectedFolderPath(destinationFolderInfo.fullPath);
+          setDestinationMode('OFFICIAL');
+        }
+      }
+    } catch (err: any) {
+      alert(`Failed to delete folder: ${err.message}`);
+    }
+  };
 
   const handleToggleChecklist = async (itemId: string) => {
     if (!selectedAssignment) return;
@@ -763,6 +863,323 @@ export const FieldCrewPortalPage: React.FC = () => {
                     </button>
                   </div>
 
+                  {/* PROMINENT GOOGLE DRIVE TARGET DESTINATION CARD */}
+                  <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 text-white shadow-md border border-slate-700/60 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div className="space-y-1.5 flex-1 min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="p-1.5 rounded-lg bg-blue-500/20 text-blue-400 border border-blue-400/30">
+                          <FolderOpen className="w-4 h-4" />
+                        </div>
+                        <span className="text-[11px] font-bold tracking-wider uppercase text-slate-300">
+                          Google Drive Upload Destination
+                        </span>
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                          Live Connected
+                        </span>
+                        {destinationMode === 'PERSONAL' && (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                            Personal Crew Drive
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Exact Path Breadcrumb */}
+                      <div className="flex items-center gap-2 text-sm sm:text-base font-extrabold text-white truncate">
+                        <HardDrive className="w-4 h-4 text-slate-400 shrink-0" />
+                        <span className="truncate">
+                          {selectedFolderPath || destinationFolderInfo?.fullPath || 'SAVISKAR 2026 > Photography'}
+                        </span>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-300">
+                        <span>Drive Folder ID: <code className="px-1.5 py-0.5 rounded bg-slate-800 font-mono text-[10px] text-slate-200">{selectedFolderId || destinationFolderInfo?.driveFolderId || '1tFGNR9WZo_9dGgf_6zBOHdBnpPRxBQXQ'}</code></span>
+                        <span>•</span>
+                        <span className="text-slate-400">Account: rikhiritik8@gmail.com</span>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2 shrink-0">
+                      {/* Open in Drive button */}
+                      {(selectedFolderId || destinationFolderInfo?.driveFolderId) && (
+                        <a
+                          href={`https://drive.google.com/drive/folders/${selectedFolderId || destinationFolderInfo?.driveFolderId}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="px-3.5 py-2 rounded-xl text-xs font-bold bg-white/10 hover:bg-white/20 text-white border border-white/20 transition-all flex items-center gap-1.5"
+                          title="Open this exact folder in Google Drive"
+                        >
+                          <span>Open Drive</span>
+                          <ExternalLink className="w-3.5 h-3.5 text-slate-300" />
+                        </a>
+                      )}
+
+                      {/* Switch Target / Manage Personal Drive button */}
+                      <button
+                        onClick={() => setShowPersonalDriveDrawer(!showPersonalDriveDrawer)}
+                        className="px-3.5 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white shadow-sm transition-all flex items-center gap-1.5"
+                      >
+                        <FolderPlus className="w-3.5 h-3.5" />
+                        <span>{showPersonalDriveDrawer ? 'Close Drive Selector' : 'Change Target / My Drive'}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* INTERACTIVE DRIVE TARGET & PERSONAL DRIVE EXPLORER DRAWER */}
+                  {showPersonalDriveDrawer && (
+                    <div className="p-5 rounded-2xl bg-white border border-slate-200 shadow-md space-y-4 animate-in fade-in duration-200">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                        <div>
+                          <h4 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                            <Layers className="w-4 h-4 text-red-600" />
+                            <span>Select Google Drive Target Destination</span>
+                          </h4>
+                          <p className="text-xs text-slate-500">
+                            Choose between official SAVISKAR 2026 event categories or your private role-tailored Personal Drive.
+                          </p>
+                        </div>
+
+                        {/* Mode Switcher Tabs */}
+                        <div className="flex items-center gap-1 p-1 rounded-xl bg-slate-100 border border-slate-200 self-start sm:self-auto">
+                          <button
+                            onClick={() => {
+                              setDestinationMode('OFFICIAL');
+                              if (destinationFolderInfo?.driveFolderId) {
+                                setSelectedFolderId(destinationFolderInfo.driveFolderId);
+                                setSelectedFolderPath(destinationFolderInfo.fullPath || destinationFolderInfo.folderName);
+                              }
+                            }}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                              destinationMode === 'OFFICIAL'
+                                ? 'bg-white text-slate-900 shadow-xs'
+                                : 'text-slate-600 hover:text-slate-900'
+                            }`}
+                          >
+                            🏛️ Official Event Folders
+                          </button>
+                          <button
+                            onClick={() => setDestinationMode('PERSONAL')}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                              destinationMode === 'PERSONAL'
+                                ? 'bg-white text-slate-900 shadow-xs'
+                                : 'text-slate-600 hover:text-slate-900'
+                            }`}
+                          >
+                            📸 My Personal Drive
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* TAB 1: OFFICIAL EVENT FOLDERS */}
+                      {destinationMode === 'OFFICIAL' && (
+                        <div className="space-y-3">
+                          <div className="text-xs text-slate-600 font-semibold">
+                            Select standard SAVISKAR 2026 event target:
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
+                            {driveFolders.length > 0 ? (
+                              driveFolders.slice(0, 9).map(folder => {
+                                const isSelected = selectedFolderId === folder.driveFolderId;
+                                return (
+                                  <div
+                                    key={folder.path}
+                                    onClick={() => handleSelectOfficialFolder(folder.driveFolderId, folder.path)}
+                                    className={`p-3 rounded-xl border text-left cursor-pointer transition-all flex flex-col justify-between gap-2 ${
+                                      isSelected
+                                        ? 'bg-red-50 border-red-500 ring-2 ring-red-500/20'
+                                        : 'bg-slate-50 hover:bg-slate-100 border-slate-200'
+                                    }`}
+                                  >
+                                    <div className="flex items-start justify-between gap-2">
+                                      <span className="text-xs font-bold text-slate-900 truncate">
+                                        {folder.name}
+                                      </span>
+                                      {isSelected && (
+                                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-600 text-white shrink-0">
+                                          ✓ Active Target
+                                        </span>
+                                      )}
+                                    </div>
+                                    <p className="text-[10px] text-slate-500 truncate">
+                                      {folder.path}
+                                    </p>
+                                  </div>
+                                );
+                              })
+                            ) : (
+                              <div className="p-4 col-span-3 text-center text-xs text-slate-500 bg-slate-50 rounded-xl">
+                                Loading official Google Drive structure...
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* TAB 2: MY PERSONAL DRIVE */}
+                      {destinationMode === 'PERSONAL' && (
+                        <div className="space-y-4">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-xl bg-amber-50 border border-amber-200">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-bold text-amber-950">
+                                  {personalDrive?.userName || user?.full_name}'s Personal Vault
+                                </span>
+                                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-200 text-amber-900 uppercase">
+                                  {personalDrive?.role || activeRole}
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-amber-800 mt-0.5">
+                                Dedicated Google Drive hierarchy automatically provisioned for your role. Files upload directly into your personal folders.
+                              </p>
+                            </div>
+                            {personalDrive?.personalRootFolderUrl && (
+                              <a
+                                href={personalDrive.personalRootFolderUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white flex items-center gap-1.5 shrink-0 self-start sm:self-auto"
+                              >
+                                <span>Open My Drive ↗</span>
+                              </a>
+                            )}
+                          </div>
+
+                          {/* Personal Subfolder Grid */}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                            {personalDrive?.subfolders && personalDrive.subfolders.length > 0 ? (
+                              personalDrive.subfolders.map(sub => {
+                                const isSelected = selectedFolderId === sub.driveFolderId;
+                                const isEditing = editingSubfolderId === sub.driveFolderId;
+                                return (
+                                  <div
+                                    key={sub.id}
+                                    className={`p-3.5 rounded-xl border transition-all flex flex-col justify-between gap-2.5 ${
+                                      isSelected
+                                        ? 'bg-amber-50/80 border-amber-500 ring-2 ring-amber-500/20'
+                                        : 'bg-white hover:bg-slate-50 border-slate-200'
+                                    }`}
+                                  >
+                                    <div className="flex items-start justify-between gap-2">
+                                      <div className="flex-1 min-w-0">
+                                        {isEditing ? (
+                                          <div className="flex items-center gap-1.5">
+                                            <input
+                                              type="text"
+                                              value={editingSubfolderName}
+                                              onChange={e => setEditingSubfolderName(e.target.value)}
+                                              className="w-full px-2 py-1 text-xs border rounded border-amber-400 focus:outline-hidden"
+                                              autoFocus
+                                            />
+                                            <button
+                                              onClick={() => handleRenamePersonalSubfolder(sub.driveFolderId)}
+                                              className="px-2 py-1 rounded bg-amber-600 text-white text-[11px] font-bold"
+                                            >
+                                              Save
+                                            </button>
+                                            <button
+                                              onClick={() => setEditingSubfolderId(null)}
+                                              className="px-2 py-1 rounded bg-slate-200 text-slate-700 text-[11px]"
+                                            >
+                                              Cancel
+                                            </button>
+                                          </div>
+                                        ) : (
+                                          <span className="text-xs font-bold text-slate-900 block truncate">
+                                            {sub.name}
+                                          </span>
+                                        )}
+                                        <span className="text-[10px] text-slate-500 block truncate mt-0.5">
+                                          {sub.path}
+                                        </span>
+                                      </div>
+
+                                      {isSelected && (
+                                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-600 text-white shrink-0">
+                                          ✓ Active Target
+                                        </span>
+                                      )}
+                                    </div>
+
+                                    <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-100">
+                                      <button
+                                        onClick={() => handleSelectPersonalFolder(sub)}
+                                        className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                                          isSelected
+                                            ? 'bg-amber-600 text-white shadow-2xs'
+                                            : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                                        }`}
+                                      >
+                                        {isSelected ? 'Selected' : 'Select Target'}
+                                      </button>
+
+                                      <div className="flex items-center gap-1.5">
+                                        <a
+                                          href={sub.driveWebUrl}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          className="p-1 rounded text-slate-400 hover:text-slate-700"
+                                          title="Open in Drive"
+                                        >
+                                          <ExternalLink className="w-3.5 h-3.5" />
+                                        </a>
+
+                                        {!sub.isDefault && (
+                                          <>
+                                            <button
+                                              onClick={() => {
+                                                setEditingSubfolderId(sub.driveFolderId);
+                                                setEditingSubfolderName(sub.name);
+                                              }}
+                                              className="p-1 rounded text-slate-400 hover:text-amber-600"
+                                              title="Rename subfolder"
+                                            >
+                                              <Edit2 className="w-3.5 h-3.5" />
+                                            </button>
+                                            <button
+                                              onClick={() => handleDeletePersonalSubfolder(sub.driveFolderId)}
+                                              className="p-1 rounded text-slate-400 hover:text-red-600"
+                                              title="Delete subfolder"
+                                            >
+                                              <Trash2 className="w-3.5 h-3.5" />
+                                            </button>
+                                          </>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              })
+                            ) : (
+                              <div className="p-4 col-span-2 text-center text-xs text-slate-500 bg-slate-50 rounded-xl">
+                                {personalDriveLoading ? 'Provisioning your personal Google Drive...' : 'No personal subfolders found.'}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Add Custom Subfolder Form */}
+                          <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                            <input
+                              type="text"
+                              placeholder="New subfolder name (e.g. Drone RAWs, Stage Stills)..."
+                              value={newSubfolderName}
+                              onChange={e => setNewSubfolderName(e.target.value)}
+                              onKeyDown={e => e.key === 'Enter' && handleCreatePersonalSubfolder()}
+                              className="flex-1 px-3 py-2 text-xs rounded-lg border border-slate-300 focus:outline-hidden focus:border-red-500 bg-white"
+                            />
+                            <button
+                              onClick={handleCreatePersonalSubfolder}
+                              disabled={isCreatingSubfolder || !newSubfolderName.trim()}
+                              className="px-4 py-2 rounded-lg text-xs font-bold bg-slate-900 hover:bg-black text-white disabled:opacity-50 flex items-center justify-center gap-1.5 shrink-0"
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                              <span>{isCreatingSubfolder ? 'Creating in Drive...' : 'Add Subfolder'}</span>
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {/* Drag & Drop Upload Card */}
                   <div
                     ref={dropzoneRef}
@@ -797,6 +1214,13 @@ export const FieldCrewPortalPage: React.FC = () => {
                         ? 'Drop 4K Video Clips or Soundboard WAV Stems Here'
                         : 'Drop Photos or 4K Video Clips Here'}
                     </h3>
+
+                    {/* TARGET FOLDER PROMINENT BADGE */}
+                    <div className="my-2.5 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-100/90 text-red-900 text-xs font-bold border border-red-200/80 shadow-2xs">
+                      <FolderOpen className="w-3.5 h-3.5 text-red-600 shrink-0" />
+                      <span>Target: <strong className="underline decoration-red-400">{selectedFolderPath || destinationFolderInfo?.fullPath || 'SAVISKAR 2026'}</strong> on Google Drive</span>
+                    </div>
+
                     <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
                       {roleMediaFilter === 'PHOTO'
                         ? 'Tap or drag camera files from your SD card. Supports Canon CR2/CR3, Nikon NEF, Sony ARW, DNG, and JPEG.'

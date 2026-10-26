@@ -266,3 +266,132 @@ driveRouter.post('/validate-url', authMiddleware, (req: AuthenticatedRequest, re
     data: validation
   });
 });
+
+// ==========================================
+// User Personal Drive Endpoints
+// ==========================================
+
+// Get or auto-provision personal drive for current logged-in user
+driveRouter.get('/my-drive', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const personalDrive = await DriveService.getUserPersonalDrive(req.user!);
+    res.json({
+      success: true,
+      data: personalDrive
+    });
+  } catch (err: any) {
+    res.status(500).json({
+      success: false,
+      error: { code: 'PERSONAL_DRIVE_FAILED', message: err.message || 'Failed to retrieve personal drive' }
+    });
+  }
+});
+
+// Add a custom subfolder inside user's personal drive
+driveRouter.post('/my-drive/folders', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  const { folderName, parentFolderId } = req.body;
+  if (!folderName || !folderName.trim()) {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'INVALID_INPUT', message: 'folderName is required' }
+    });
+  }
+
+  try {
+    const createdSubfolder = await DriveService.addUserPersonalSubfolder(
+      req.user!,
+      folderName.trim(),
+      parentFolderId
+    );
+
+    AuditService.log({
+      actorId: req.user!.id,
+      actorName: req.user!.full_name,
+      actorRole: req.user!.roles[0],
+      action: 'CREATE_PERSONAL_DRIVE_FOLDER',
+      entityType: 'FOLDER',
+      entityId: createdSubfolder.driveFolderId,
+      details: { folderName, path: createdSubfolder.path }
+    });
+
+    res.status(201).json({
+      success: true,
+      data: createdSubfolder
+    });
+  } catch (err: any) {
+    res.status(400).json({
+      success: false,
+      error: { code: 'CREATE_SUBFOLDER_FAILED', message: err.message || 'Failed to create subfolder' }
+    });
+  }
+});
+
+// Rename a personal subfolder
+driveRouter.patch('/my-drive/folders/:folderId', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  const { newName } = req.body;
+  const { folderId } = req.params;
+
+  if (!newName || !newName.trim()) {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'INVALID_INPUT', message: 'newName is required' }
+    });
+  }
+
+  try {
+    const updated = await DriveService.renameUserPersonalSubfolder(
+      req.user!,
+      folderId,
+      newName.trim()
+    );
+
+    AuditService.log({
+      actorId: req.user!.id,
+      actorName: req.user!.full_name,
+      actorRole: req.user!.roles[0],
+      action: 'RENAME_PERSONAL_DRIVE_FOLDER',
+      entityType: 'FOLDER',
+      entityId: folderId,
+      details: { newName: newName.trim(), path: updated.path }
+    });
+
+    res.json({
+      success: true,
+      data: updated
+    });
+  } catch (err: any) {
+    res.status(400).json({
+      success: false,
+      error: { code: 'RENAME_SUBFOLDER_FAILED', message: err.message || 'Failed to rename folder' }
+    });
+  }
+});
+
+// Delete a custom personal subfolder
+driveRouter.delete('/my-drive/folders/:folderId', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  const { folderId } = req.params;
+
+  try {
+    const result = await DriveService.deleteUserPersonalSubfolder(req.user!, folderId);
+
+    AuditService.log({
+      actorId: req.user!.id,
+      actorName: req.user!.full_name,
+      actorRole: req.user!.roles[0],
+      action: 'DELETE_PERSONAL_DRIVE_FOLDER',
+      entityType: 'FOLDER',
+      entityId: folderId,
+      details: { deletedAt: new Date().toISOString() }
+    });
+
+    res.json({
+      success: true,
+      data: result
+    });
+  } catch (err: any) {
+    res.status(400).json({
+      success: false,
+      error: { code: 'DELETE_SUBFOLDER_FAILED', message: err.message || 'Failed to delete folder' }
+    });
+  }
+});

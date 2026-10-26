@@ -195,6 +195,15 @@ export class SupabaseService {
     }
   }
 
+  static async deleteMediaFolder(folderId: string): Promise<void> {
+    if (!this.isAvailable()) return;
+    try {
+      await supabase!.from('media_folders').delete().eq('id', folderId);
+    } catch (err: any) {
+      console.warn('[SupabaseService] Failed to delete media folder from cloud:', err.message);
+    }
+  }
+
   // Persist Editing Project
   static async persistEditingProject(project: Partial<EditingProject>): Promise<void> {
     if (!this.isAvailable()) return;

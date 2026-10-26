@@ -4,6 +4,7 @@ import { db } from '../db/memoryStore';
 import { UserRole } from '@mediaverse/shared-types';
 import { AuthService } from '../services/authService';
 import { AuditService } from '../services/auditService';
+import { DriveService } from '../services/driveService';
 
 export const authRouter = Router();
 
@@ -19,6 +20,10 @@ authRouter.post('/login', async (req: Request, res: Response) => {
 
   try {
     const result = await AuthService.login({ email, password });
+    // Proactively provision user's personal drive in Google Drive in background
+    DriveService.provisionPersonalUserDrive(result.user).catch(err => {
+      console.warn(`[DriveService] Background personal drive provisioning notice: ${err.message}`);
+    });
     AuditService.log({
       actorId: result.user.id,
       actorName: result.user.full_name,
@@ -58,6 +63,11 @@ authRouter.post('/register', async (req: Request, res: Response) => {
       password,
       role: role as UserRole,
       phone
+    });
+
+    // Proactively provision user's personal drive in Google Drive in background
+    DriveService.provisionPersonalUserDrive(result.user).catch(err => {
+      console.warn(`[DriveService] Background personal drive provisioning notice: ${err.message}`);
     });
 
     AuditService.log({

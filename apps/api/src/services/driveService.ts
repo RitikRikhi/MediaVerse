@@ -1,6 +1,6 @@
 import { config } from '../config';
 import { db } from '../db/memoryStore';
-import { MediaFolder } from '@mediaverse/shared-types';
+import { MediaFolder, PersonalDriveInfo, PersonalSubfolder, UserRole } from '@mediaverse/shared-types';
 import { SupabaseService } from './supabaseService';
 import crypto from 'crypto';
 import fs from 'fs';
@@ -85,6 +85,7 @@ export class DriveService {
 
   static init(): void {
     this.loadTokensFromDisk();
+    this.preloadFolderCache();
 
     const masterRefreshToken = config.google.refreshToken;
 
@@ -110,6 +111,96 @@ export class DriveService {
       }).catch(err => {
         console.warn('[DriveService] Initial master token refresh warning:', err.message);
       });
+    }
+  }
+
+  static preloadFolderCache(): void {
+    try {
+      const rootId = config.google.rootFolderId || '1PNvblS0BffXR12av3dC7fP7wNdf948kO';
+      this.tokenState.activeRootFolderId = rootId;
+      this.tokenState.activeRootFolderUrl = config.google.rootFolderUrl || `https://drive.google.com/drive/folders/${rootId}`;
+      this.folderIdCache.set('root', rootId);
+      this.folderIdCache.set('DSA MEDIAVERSE SAVISKAR 26', rootId);
+
+      // Preload verified Saviskar 2026 Google Drive folder IDs
+      const standardMappings: [string, string][] = [
+        ['Day 1', '1joHnEgWyV8rHJ_EuhaRPTwwfY00CKXUp'],
+        ['Day 1/Photography', '1tFGNR9WZo_9dGgf_6zBOHdBnpPRxBQXQ'],
+        ['Day 1/Raw Videography', '1m7U0n1wuICACLVBmKl8YYLqEXvmVALWQ'],
+        ['Day 1/Editing Projects', '1Mgc1jPrW1OnjXCWh24ExtC7Selj5v0kb'],
+        ['Day 1/Review Versions', '14WHUxbCWO3C_R95AhnqWG-idVX82At7E'],
+        ['Day 1/Approved Deliverables', '1FqNcaFlb-VQvO5YNC3xRYF1T2MFOjwIw'],
+        ['Day 2', '1N6Tfp3qt87ivWgKUj-H8vr9HNVIebEos'],
+        ['Day 2/Photography', '1gLGhFYTYMwXxB3kmdrRN7ZE274nuZcI1'],
+        ['Day 2/Raw Videography', '1LF1A9AbGiWyQlYKT0V0v7LH3OPCcBGUF'],
+        ['Day 2/Editing Projects', '1vS0pzFceh2jPxYi6zpzDyaux4E_q6S4m'],
+        ['Day 2/Review Versions', '1rsd_DwXpiS57q1Yk-Aud5zDovfEFVLlM'],
+        ['Day 2/Approved Deliverables', '1sLmZmVP8ZTAc2Juknb1OTuQPaAPo86pA'],
+        ['Day 3', '1GB79lRv25uyFkCGwRSeASKhyQ8BaCkdq'],
+        ['Day 3/Photography - Trophies & Medals', '1E9IgogrW4LkF9w-3BZNHr8D8qdecckTi'],
+        ['Day 3/Photography - Winner Celebrations', '1KqWT6_udlPX8cKGaoxhoL6FCOtbEhZ_T'],
+        ['Day 3/Raw Videography - Valedictory Speeches', '1ZPUcTVEOfZMurEpHqNGOr2xzuV5mirnB'],
+        ['Day 3/Approved Deliverables', '18LtXVXGaaqgpKGtqzEktpq5_0DyI8Gyj'],
+        ['Social Media & Quick Reels Vault', '1lRSqTLSBcGwrau5v2p2gWqGF31LOJtPv'],
+        ['Branding & Official Crew Assets', '1Zywr3VN7k-kGF0MTQjCQzfSl1NM8UViZ'],
+        ['Lamp Lighting & Ceremonial', '1pKCq7zqDvxjbpN1ZnsR-BPc_XRQsVYLE'],
+        ['VIP Dignitaries & Guests', '1Nfg4DUYihZV7w8Giir97LGVNBT3i8RQO'],
+        ['Audience & Atmosphere', '1OGrNONYwFnDHInjZJbOb2g_6OZux5kpy'],
+        ['Stage 4K Multicam', '1mFzJj5f1EBXyJ8G_Io-IzXtBPGS9xhfY'],
+        ['B-Roll & Atmosphere', '1g1rqSkYDiJzpyUpdxNVpZxhG4lZOMmRS'],
+        ['Interviews & Testimonials', '12n-wXqiaeLnzlM1pjr3vYIroYqWGb8hV'],
+        ['Hackathon Pitches & Project Expo', '1fpWSBjToYblPRBDVjf9enyGTpyDYeHNb'],
+        ['Workshops & Coding Battles', '19f53D_XrSRhftBNK74tPENZnlnXdIZ7D'],
+        ['Star Night & Stage Performances', '1nPfFKIetn1hrJARVdcrcDBaCUgCGC_VM'],
+        ['Project Demos & Student Reactions', '1DrypkCSGAlGEtOdueT--VKUj1lfaEzcU'],
+        ['Cultural Performances 4K', '1TKF1nK6lHD3dKEmg_6xmWTva3Fxq6BNR'],
+        ['Star Night Highlights', '1uWKvxIGaQMgHbNo6VRjRwdQt4fxq7PNo'],
+        ['Instagram Reels (9x16 Vertical)', '1d5OaYKjQxpeXFyO8pwSBVZnifcn8g6CV'],
+        ['YouTube Shorts & Highlights', '17842qY6y79FyneGn7bKkyLQVDgCXpoUt'],
+        ['Logos & Watermarks', '1y1ARZJzU1yfpM_OylNDdanpkfphtPbyK'],
+        ['Motion Lower Thirds & Intro Jingles', '1sBXgJbczNz2KaSe0zbL-sTFE8YLUnAd4']
+      ];
+
+      for (const [key, id] of standardMappings) {
+        this.folderIdCache.set(key, id);
+        this.folderIdCache.set(key.toLowerCase(), id);
+        this.folderIdCache.set(`${rootId}:::${key}`, id);
+      }
+
+      // Also index all nodes from .drive_structure.json if present
+      const structure = this.getFolderStructure();
+      const traverse = (node: FolderNode, parentDriveId?: string) => {
+        if (node.driveFolderId) {
+          this.folderIdCache.set(node.path, node.driveFolderId);
+          this.folderIdCache.set(node.path.toLowerCase(), node.driveFolderId);
+          this.folderIdCache.set(node.name, node.driveFolderId);
+          this.folderIdCache.set(node.name.toLowerCase(), node.driveFolderId);
+          if (parentDriveId) {
+            this.folderIdCache.set(`${parentDriveId}:::${node.name}`, node.driveFolderId);
+          }
+        }
+        if (node.children) {
+          for (const child of node.children) {
+            traverse(child, node.driveFolderId || parentDriveId);
+          }
+        }
+      };
+      traverse(structure, rootId);
+
+      // Index database media folders
+      for (const f of db.mediaFolders) {
+        if (f.drive_folder_id) {
+          this.folderIdCache.set(f.folder_path, f.drive_folder_id);
+          this.folderIdCache.set(f.folder_name, f.drive_folder_id);
+          if (f.user_id) {
+            this.folderIdCache.set(`user:${f.user_id}:${f.folder_name}`, f.drive_folder_id);
+          }
+        }
+      }
+
+      console.log(`[DriveService] Folder cache preloaded with ${this.folderIdCache.size} instant-lookup mappings (0ms latency).`);
+    } catch (err: any) {
+      console.warn('[DriveService] Folder cache preloading notice:', err.message);
     }
   }
 
@@ -865,13 +956,30 @@ export class DriveService {
       category = 'Editing Projects';
     }
 
+    // Direct verified real Google Drive folder IDs
+    let driveFolderId = '';
+    if (day === 'Day 1') {
+      if (category === 'Photography') driveFolderId = '1tFGNR9WZo_9dGgf_6zBOHdBnpPRxBQXQ';
+      else if (category === 'Raw Videography') driveFolderId = '1m7U0n1wuICACLVBmKl8YYLqEXvmVALWQ';
+      else if (category === 'Editing Projects') driveFolderId = '1Mgc1jPrW1OnjXCWh24ExtC7Selj5v0kb';
+      else if (category === 'Review Versions') driveFolderId = '14WHUxbCWO3C_R95AhnqWG-idVX82At7E';
+      else if (category === 'Approved Deliverables') driveFolderId = '1FqNcaFlb-VQvO5YNC3xRYF1T2MFOjwIw';
+    } else {
+      if (category === 'Photography') driveFolderId = '1gLGhFYTYMwXxB3kmdrRN7ZE274nuZcI1';
+      else if (category === 'Raw Videography') driveFolderId = '1LF1A9AbGiWyQlYKT0V0v7LH3OPCcBGUF';
+      else if (category === 'Editing Projects') driveFolderId = '1vS0pzFceh2jPxYi6zpzDyaux4E_q6S4m';
+      else if (category === 'Review Versions') driveFolderId = '1rsd_DwXpiS57q1Yk-Aud5zDovfEFVLlM';
+      else if (category === 'Approved Deliverables') driveFolderId = '1sLmZmVP8ZTAc2Juknb1OTuQPaAPo86pA';
+    }
+
+    // Double check memory cache if mapped
+    const cacheKey = `${day}/${category}`;
+    if (this.folderIdCache.has(cacheKey)) {
+      driveFolderId = this.folderIdCache.get(cacheKey)!;
+    }
+
     const fullPath = `DSA MediaVerse - SAVISKAR 2026/${day}/${category}`;
-    const rootUrl = config.google.rootFolderUrl || 'https://drive.google.com/drive/folders/1PNvblS0BffXR12av3dC7fP7wNdf948kO';
-    
-    // Deterministic folder ID hash for consistent linking
-    const folderHash = crypto.createHash('md5').update(fullPath).digest('hex').slice(0, 12);
-    const driveFolderId = `sav26-${day.toLowerCase().replace(' ', '')}-${category.toLowerCase().replace(' ', '')}-${folderHash}`;
-    const driveFolderUrl = `${rootUrl}?folder=${driveFolderId}&path=${encodeURIComponent(fullPath)}`;
+    const driveFolderUrl = `https://drive.google.com/drive/folders/${driveFolderId}`;
 
     return {
       day,
@@ -1123,7 +1231,7 @@ export class DriveService {
     }
   }
 
-  // Real File Upload Handler (Streams to Google Drive into the exact resolved subfolder)
+  // Real File Upload Handler (Streams to Google Drive with 0ms pre-lookup and 16MB chunked streaming for large files)
   static async uploadFileToDrive(options: {
     filePath: string;
     originalName: string;
@@ -1147,35 +1255,43 @@ export class DriveService {
       throw new Error('GOOGLE_DRIVE_NOT_CONNECTED: Google Drive is not connected. Please authorize Google Drive before uploading photos.');
     }
 
-    const root = await this.resolveRootFolderId();
-    const rootId = root.id;
-
     let destinationFolderId: string = '';
     let finalFolderPath: string = '';
 
-    // 1. If explicit targetFolderId is provided, upload directly into that folder
-    if (targetFolderId && targetFolderId.trim()) {
+    // 1. Ultra-fast direct check from targetFolderId (0ms lookup)
+    if (targetFolderId && targetFolderId.trim() && !targetFolderId.startsWith('sav26-')) {
       destinationFolderId = targetFolderId.trim();
       finalFolderPath = targetFolderPath || 'Selected Google Drive Folder';
     } else if (targetFolderPath && targetFolderPath.trim()) {
-      // Look up existing node in structure by path
-      const structure = this.getFolderStructure();
-      const node = this.findNodeByPath(structure, targetFolderPath.trim());
-      if (node && node.driveFolderId) {
-        destinationFolderId = node.driveFolderId;
-        finalFolderPath = node.path;
+      if (this.folderIdCache.has(targetFolderPath.trim())) {
+        destinationFolderId = this.folderIdCache.get(targetFolderPath.trim())!;
+        finalFolderPath = targetFolderPath.trim();
+      } else {
+        const structure = this.getFolderStructure();
+        const node = this.findNodeByPath(structure, targetFolderPath.trim());
+        if (node && node.driveFolderId) {
+          destinationFolderId = node.driveFolderId;
+          finalFolderPath = node.path;
+        }
       }
     }
 
-    // 2. If no target specified or not found, fall back to assignment destination (Day / Category)
+    // 2. Direct fast check from destination (0ms lookup)
     if (!destinationFolderId) {
       const destination = options.destination || this.resolveDestination();
-      finalFolderPath = destination.fullPath;
-      const dayFolderId = await this.getOrCreateDriveFolder(destination.day, rootId);
-      destinationFolderId = await this.getOrCreateDriveFolder(destination.category, dayFolderId);
+      if (destination.driveFolderId && !destination.driveFolderId.startsWith('sav26-')) {
+        destinationFolderId = destination.driveFolderId;
+        finalFolderPath = destination.fullPath;
+      } else {
+        const root = await this.resolveRootFolderId();
+        const rootId = root.id;
+        finalFolderPath = destination.fullPath;
+        const dayFolderId = await this.getOrCreateDriveFolder(destination.day, rootId);
+        destinationFolderId = await this.getOrCreateDriveFolder(destination.category, dayFolderId);
+      }
     }
 
-    console.log(`[DriveService] Uploading "${originalName}" (${mimeType}) directly into Google Drive folder "${finalFolderPath}" (Folder ID: ${destinationFolderId})...`);
+    console.log(`[DriveService] Fast-streaming "${originalName}" (${mimeType}, ${(options.sizeBytes / (1024 * 1024)).toFixed(2)} MB) directly into Google Drive folder "${finalFolderPath}" (ID: ${destinationFolderId})...`);
 
     const metadata = {
       name: originalName,
@@ -1183,57 +1299,123 @@ export class DriveService {
       description: `Uploaded via DSA MediaVerse for SAVISKAR 2026 -> ${finalFolderPath}`
     };
 
-    // For large files (> 4MB, like raw video or big camera RAW files), use Google Resumable Upload
-    // This provides dedicated chunking and prevents memory exhaustion on container instances
-    if (options.sizeBytes > 4 * 1024 * 1024) {
-      console.log(`[DriveService] Using Google Resumable Streaming pipeline for large file (${Math.round(options.sizeBytes / (1024 * 1024))} MB)...`);
-      const initRes = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true', {
+    try {
+      // For large files (> 4MB, like raw DSLR photos 90-100MB or 400MB-1GB+ 4K videos), use Google Resumable Upload
+      // Using chunked 16MB slices to maintain low constant memory (~16MB) and prevent OOM
+      if (options.sizeBytes > 4 * 1024 * 1024) {
+        console.log(`[DriveService] Initiating Google Resumable Chunked Upload pipeline for large file (${(options.sizeBytes / (1024 * 1024)).toFixed(1)} MB)...`);
+        const initRes = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json; charset=UTF-8',
+            'X-Upload-Content-Type': mimeType,
+            'X-Upload-Content-Length': String(options.sizeBytes)
+          },
+          body: JSON.stringify(metadata)
+        });
+
+        if (!initRes.ok) {
+          const errText = await initRes.text();
+          console.error(`[DriveService] Google Resumable Upload init failed: ${errText}`);
+          throw new Error(`Google Resumable Upload init failed: ${errText}`);
+        }
+
+        const location = initRes.headers.get('location');
+        if (!location) {
+          throw new Error('Google did not return upload session location');
+        }
+
+        const CHUNK_SIZE = 16 * 1024 * 1024; // 16MB slices
+        const totalBytes = options.sizeBytes;
+        let offset = 0;
+        let finalUploadData: any = null;
+
+        const fileHandle = await fs.promises.open(filePath, 'r');
+        try {
+          while (offset < totalBytes) {
+            const chunkSize = Math.min(CHUNK_SIZE, totalBytes - offset);
+            const chunkBuffer = Buffer.alloc(chunkSize);
+            await fileHandle.read(chunkBuffer, 0, chunkSize, offset);
+
+            const endByte = offset + chunkSize - 1;
+            const chunkRes = await fetch(location, {
+              method: 'PUT',
+              headers: {
+                'Content-Range': `bytes ${offset}-${endByte}/${totalBytes}`,
+                'Content-Length': String(chunkSize),
+                'Content-Type': mimeType
+              },
+              body: chunkBuffer
+            });
+
+            if (chunkRes.status === 200 || chunkRes.status === 201) {
+              finalUploadData = await chunkRes.json();
+              break;
+            } else if (chunkRes.status === 308) {
+              offset += chunkSize;
+              const pct = Math.round((offset / totalBytes) * 100);
+              console.log(`[DriveService] Streamed chunk ${offset}/${totalBytes} bytes (${pct}%) for "${originalName}"`);
+            } else {
+              const errText = await chunkRes.text();
+              throw new Error(`Google Resumable Upload chunk failed (${chunkRes.status}): ${errText}`);
+            }
+          }
+        } finally {
+          await fileHandle.close();
+        }
+
+        if (!finalUploadData) {
+          throw new Error('Upload completed without receiving Google Drive file metadata');
+        }
+
+        console.log(`[DriveService] Resumable upload successful! File ID: ${finalUploadData.id}, Link: ${finalUploadData.webViewLink}`);
+
+        return {
+          fileId: finalUploadData.id,
+          webViewLink: finalUploadData.webViewLink || `https://drive.google.com/file/d/${finalUploadData.id}/view`,
+          thumbnailLink: finalUploadData.thumbnailLink,
+          driveFolderId: destinationFolderId,
+          driveFolderUrl: `https://drive.google.com/drive/folders/${destinationFolderId}`,
+          folderPath: finalFolderPath
+        };
+      }
+
+      // Small files (<= 4MB) direct multipart upload
+      const boundary = '-------314159265358979323846';
+      const delimiter = `\r\n--${boundary}\r\n`;
+      const closeDelimiter = `\r\n--${boundary}--`;
+
+      const fileBuffer = await fs.promises.readFile(filePath);
+      const multipartBody = Buffer.concat([
+        Buffer.from(
+          delimiter +
+          'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
+          JSON.stringify(metadata) +
+          delimiter +
+          `Content-Type: ${mimeType}\r\n\r\n`
+        ),
+        fileBuffer,
+        Buffer.from(closeDelimiter)
+      ]);
+
+      const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=id,name,webViewLink,thumbnailLink,webContentLink', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json; charset=UTF-8',
-          'X-Upload-Content-Type': mimeType,
-          'X-Upload-Content-Length': String(options.sizeBytes)
+          'Content-Type': `multipart/related; boundary=${boundary}`
         },
-        body: JSON.stringify(metadata)
+        body: multipartBody
       });
 
-      if (!initRes.ok) {
-        const errText = await initRes.text();
-        console.error(`[DriveService] Google Resumable Upload init failed: ${errText}`);
-        throw new Error(`Google Resumable Upload init failed: ${errText}`);
+      if (!res.ok) {
+        const errText = await res.text();
+        console.error(`[DriveService] Google Drive direct upload failed: ${errText}`);
+        throw new Error(`Google Drive API upload failed (${res.status}): ${errText}`);
       }
 
-      const location = initRes.headers.get('location');
-      if (!location) {
-        throw new Error('Google did not return upload session location');
-      }
-
-      const fileBuffer = await fs.promises.readFile(filePath);
-      const uploadRes = await fetch(location, {
-        method: 'PUT',
-        headers: {
-          'Content-Length': String(options.sizeBytes),
-          'Content-Type': mimeType
-        },
-        body: fileBuffer
-      });
-
-      // Clean up temporary local disk file after upload attempt
-      try {
-        if (fs.existsSync(filePath)) {
-          await fs.promises.unlink(filePath);
-        }
-      } catch {}
-
-      if (!uploadRes.ok) {
-        const errText = await uploadRes.text();
-        console.error(`[DriveService] Google Resumable Upload failed: ${errText}`);
-        throw new Error(`Google Resumable Upload failed (${uploadRes.status}): ${errText}`);
-      }
-
-      const data = (await uploadRes.json()) as any;
-      console.log(`[DriveService] Resumable upload successful! File ID: ${data.id}, Link: ${data.webViewLink}`);
+      const data = (await res.json()) as any;
+      console.log(`[DriveService] Direct upload successful! File ID: ${data.id}, Link: ${data.webViewLink}`);
 
       return {
         fileId: data.id,
@@ -1243,58 +1425,345 @@ export class DriveService {
         driveFolderUrl: `https://drive.google.com/drive/folders/${destinationFolderId}`,
         folderPath: finalFolderPath
       };
+    } finally {
+      // Clean up temporary local disk file after upload attempt
+      try {
+        if (fs.existsSync(filePath)) {
+          await fs.promises.unlink(filePath);
+        }
+      } catch {}
+    }
+  }
+
+  // ==========================================
+  // Personal User Drives & Role Hierarchy
+  // ==========================================
+
+  static getPersonalDriveTemplates(role: UserRole): string[] {
+    switch (role) {
+      case 'PHOTOGRAPHER':
+        return [
+          '01 - Day 1 Morning (RAW & Stills)',
+          '02 - Day 1 Evening Rock Concert (RAW & Stills)',
+          '03 - Day 2 Tech Arena & Hackathon',
+          '04 - Day 2 Valedictory & Trophy Lift',
+          '05 - Highlights & Selects (High-Res JPG)'
+        ];
+      case 'VIDEOGRAPHER':
+        return [
+          '01 - Day 1 Morning (4K B-Roll & Stems)',
+          '02 - Day 1 Rock Concert Multi-Cam',
+          '03 - Day 2 Robo-Wars (120fps Slow-Mo)',
+          '04 - Day 2 Star Night Concert (4K Master)',
+          '05 - Soundboard Audio Stems (WAV)'
+        ];
+      case 'VIDEO_EDITOR':
+        return [
+          '01 - Day 1 Instagram Reels (9-16)',
+          '02 - Day 2 Instagram Reels (9-16)',
+          '03 - Official Festival Recap (16-9)',
+          '04 - Project Assets & SFX',
+          '05 - Exports for Review'
+        ];
+      case 'MEDIA_COORDINATOR':
+      case 'SUPER_ADMIN':
+      default:
+        return [
+          '01 - Daily Curated Highlights',
+          '02 - Press & Sponsor Kits',
+          '03 - Master Event Archives'
+        ];
+    }
+  }
+
+  static async provisionPersonalUserDrive(user: { id: string; full_name: string; email?: string; roles: UserRole[] }): Promise<PersonalDriveInfo> {
+    const role = user.roles[0] || 'PHOTOGRAPHER';
+    const rootId = config.google.rootFolderId || '1PNvblS0BffXR12av3dC7fP7wNdf948kO';
+
+    // 1. Check if user already has a personal drive record in db.mediaFolders
+    const existingPersonalRoot = db.mediaFolders.find(
+      f => f.user_id === user.id && f.is_personal && (!f.parent_folder_id || f.parent_folder_id === '')
+    );
+
+    if (existingPersonalRoot) {
+      const existingSubs = db.mediaFolders.filter(
+        f => f.user_id === user.id && f.is_personal && f.parent_folder_id === existingPersonalRoot.id
+      );
+
+      return {
+        userId: user.id,
+        userName: user.full_name,
+        role,
+        personalRootFolderId: existingPersonalRoot.drive_folder_id,
+        personalRootFolderUrl: existingPersonalRoot.drive_web_url,
+        personalRootPath: existingPersonalRoot.folder_path,
+        subfolders: existingSubs.map(s => ({
+          id: s.id,
+          name: s.folder_name,
+          path: s.folder_path,
+          driveFolderId: s.drive_folder_id,
+          driveWebUrl: s.drive_web_url,
+          isDefault: s.is_system_created,
+          created_at: s.created_at
+        }))
+      };
     }
 
-    const boundary = '-------314159265358979323846';
-    const delimiter = `\r\n--${boundary}\r\n`;
-    const closeDelimiter = `\r\n--${boundary}--`;
-
-    const fileBuffer = await fs.promises.readFile(filePath);
-    const multipartBody = Buffer.concat([
-      Buffer.from(
-        delimiter +
-        'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
-        JSON.stringify(metadata) +
-        delimiter +
-        `Content-Type: ${mimeType}\r\n\r\n`
-      ),
-      fileBuffer,
-      Buffer.from(closeDelimiter)
-    ]);
-
-    const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=id,name,webViewLink,thumbnailLink,webContentLink', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': `multipart/related; boundary=${boundary}`
-      },
-      body: multipartBody
-    });
-
-    // Clean up temporary local disk file after upload attempt
-    try {
-      if (fs.existsSync(filePath)) {
-        await fs.promises.unlink(filePath);
+    // 2. Ensure "Crew Personal Drives" parent folder exists in Google Drive
+    const parentContainerName = 'Crew Personal Drives';
+    let crewDrivesParentId = this.folderIdCache.get(parentContainerName) || '';
+    if (!crewDrivesParentId) {
+      try {
+        crewDrivesParentId = await this.getOrCreateDriveFolder(parentContainerName, rootId);
+        this.folderIdCache.set(parentContainerName, crewDrivesParentId);
+      } catch (err: any) {
+        console.warn(`[DriveService] Could not create "${parentContainerName}" in Drive: ${err.message}. Using root.`);
+        crewDrivesParentId = rootId;
       }
-    } catch {}
-
-    if (!res.ok) {
-      const errText = await res.text();
-      console.error(`[DriveService] Google Drive direct upload failed: ${errText}`);
-      throw new Error(`Google Drive API upload failed (${res.status}): ${errText}`);
     }
 
-    const data = (await res.json()) as any;
-    console.log(`[DriveService] Upload successful! Real Google Drive File ID: ${data.id}, Link: ${data.webViewLink}`);
+    // 3. Create user's personal root folder: "[User Full Name] ([ROLE])"
+    const userFolderName = `${user.full_name} (${role})`;
+    let userDriveFolderId = '';
+    try {
+      userDriveFolderId = await this.getOrCreateDriveFolder(userFolderName, crewDrivesParentId);
+    } catch {
+      userDriveFolderId = `user-drive-${user.id.slice(0, 8)}`;
+    }
+
+    const personalRootPath = `/DSA MEDIAVERSE SAVISKAR 26/${parentContainerName}/${userFolderName}`;
+    const personalRootRecord: MediaFolder = {
+      id: crypto.randomUUID(),
+      event_id: 'saviskar-2026',
+      folder_name: userFolderName,
+      folder_path: personalRootPath,
+      drive_folder_id: userDriveFolderId,
+      drive_web_url: `https://drive.google.com/drive/folders/${userDriveFolderId}`,
+      is_system_created: false,
+      user_id: user.id,
+      user_name: user.full_name,
+      role,
+      is_personal: true,
+      created_at: new Date().toISOString()
+    };
+
+    db.mediaFolders.push(personalRootRecord);
+    this.folderIdCache.set(personalRootPath, userDriveFolderId);
+    this.folderIdCache.set(userFolderName, userDriveFolderId);
+    await SupabaseService.persistMediaFolder(personalRootRecord).catch(() => {});
+
+    // 4. Provision role-specific template subfolders
+    const templateNames = this.getPersonalDriveTemplates(role);
+    const subfolders: PersonalSubfolder[] = [];
+
+    for (const subName of templateNames) {
+      let subDriveId = '';
+      if (!userDriveFolderId.startsWith('user-drive-')) {
+        try {
+          subDriveId = await this.getOrCreateDriveFolder(subName, userDriveFolderId);
+        } catch {
+          subDriveId = `sub-${crypto.randomUUID().slice(0, 8)}`;
+        }
+      } else {
+        subDriveId = `sub-${crypto.randomUUID().slice(0, 8)}`;
+      }
+
+      const subPath = `${personalRootPath}/${subName}`;
+      const subRecord: MediaFolder = {
+        id: crypto.randomUUID(),
+        event_id: 'saviskar-2026',
+        folder_name: subName,
+        folder_path: subPath,
+        parent_folder_id: personalRootRecord.id,
+        drive_folder_id: subDriveId,
+        drive_web_url: `https://drive.google.com/drive/folders/${subDriveId}`,
+        is_system_created: true,
+        user_id: user.id,
+        user_name: user.full_name,
+        role,
+        is_personal: true,
+        created_at: new Date().toISOString()
+      };
+
+      db.mediaFolders.push(subRecord);
+      this.folderIdCache.set(subPath, subDriveId);
+      this.folderIdCache.set(subName, subDriveId);
+      await SupabaseService.persistMediaFolder(subRecord).catch(() => {});
+
+      subfolders.push({
+        id: subRecord.id,
+        name: subRecord.folder_name,
+        path: subRecord.folder_path,
+        driveFolderId: subRecord.drive_folder_id,
+        driveWebUrl: subRecord.drive_web_url,
+        isDefault: true,
+        created_at: subRecord.created_at
+      });
+    }
+
+    console.log(`[DriveService] Successfully provisioned personal drive for ${user.full_name} (${role}) with ${subfolders.length} subfolders.`);
 
     return {
-      fileId: data.id,
-      webViewLink: data.webViewLink || `https://drive.google.com/file/d/${data.id}/view`,
-      thumbnailLink: data.thumbnailLink,
-      driveFolderId: destinationFolderId,
-      driveFolderUrl: `https://drive.google.com/drive/folders/${destinationFolderId}`,
-      folderPath: finalFolderPath
+      userId: user.id,
+      userName: user.full_name,
+      role,
+      personalRootFolderId: userDriveFolderId,
+      personalRootFolderUrl: personalRootRecord.drive_web_url,
+      personalRootPath,
+      subfolders
     };
+  }
+
+  static async getUserPersonalDrive(user: { id: string; full_name: string; email?: string; roles: UserRole[] }): Promise<PersonalDriveInfo> {
+    return this.provisionPersonalUserDrive(user);
+  }
+
+  static async addUserPersonalSubfolder(
+    user: { id: string; full_name: string; roles: UserRole[] },
+    folderName: string,
+    parentDriveFolderId?: string
+  ): Promise<PersonalSubfolder> {
+    const cleanName = folderName.trim();
+    if (!cleanName) throw new Error('Folder name cannot be empty.');
+
+    const personalDrive = await this.getUserPersonalDrive(user);
+    const parentId = parentDriveFolderId || personalDrive.personalRootFolderId;
+
+    let newDriveId = '';
+    if (!parentId.startsWith('user-drive-') && !parentId.startsWith('sub-')) {
+      try {
+        newDriveId = await this.getOrCreateDriveFolder(cleanName, parentId);
+      } catch {
+        newDriveId = `sub-${crypto.randomUUID().slice(0, 8)}`;
+      }
+    } else {
+      newDriveId = `sub-${crypto.randomUUID().slice(0, 8)}`;
+    }
+
+    const subPath = `${personalDrive.personalRootPath}/${cleanName}`;
+
+    const newRecord: MediaFolder = {
+      id: crypto.randomUUID(),
+      event_id: 'saviskar-2026',
+      folder_name: cleanName,
+      folder_path: subPath,
+      parent_folder_id: personalDrive.personalRootFolderId,
+      drive_folder_id: newDriveId,
+      drive_web_url: `https://drive.google.com/drive/folders/${newDriveId}`,
+      is_system_created: false,
+      user_id: user.id,
+      user_name: user.full_name,
+      role: user.roles[0],
+      is_personal: true,
+      created_at: new Date().toISOString()
+    };
+
+    db.mediaFolders.push(newRecord);
+    this.folderIdCache.set(subPath, newDriveId);
+    this.folderIdCache.set(cleanName, newDriveId);
+    await SupabaseService.persistMediaFolder(newRecord).catch(() => {});
+
+    return {
+      id: newRecord.id,
+      name: newRecord.folder_name,
+      path: newRecord.folder_path,
+      driveFolderId: newRecord.drive_folder_id,
+      driveWebUrl: newRecord.drive_web_url,
+      isDefault: false,
+      created_at: newRecord.created_at
+    };
+  }
+
+  static async renameUserPersonalSubfolder(
+    user: { id: string; full_name: string; roles: UserRole[] },
+    driveFolderId: string,
+    newName: string
+  ): Promise<PersonalSubfolder> {
+    const cleanName = newName.trim();
+    if (!cleanName) throw new Error('New folder name cannot be empty.');
+
+    const folderRecord = db.mediaFolders.find(
+      f => f.drive_folder_id === driveFolderId && f.user_id === user.id
+    );
+    if (!folderRecord) {
+      throw new Error('Personal folder not found or you do not have permission to rename it.');
+    }
+
+    const token = await this.getValidAccessToken();
+    if (token && !driveFolderId.startsWith('user-drive-') && !driveFolderId.startsWith('sub-')) {
+      try {
+        await fetch(`https://www.googleapis.com/drive/v3/files/${driveFolderId}?supportsAllDrives=true`, {
+          method: 'PATCH',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ name: cleanName })
+        });
+        console.log(`[DriveService] Renamed personal folder "${folderRecord.folder_name}" to "${cleanName}" in Google Drive`);
+      } catch (err: any) {
+        console.warn(`[DriveService] Drive rename error: ${err.message}`);
+      }
+    }
+
+    folderRecord.folder_name = cleanName;
+    const parts = folderRecord.folder_path.split('/');
+    parts[parts.length - 1] = cleanName;
+    folderRecord.folder_path = parts.join('/');
+
+    this.folderIdCache.set(folderRecord.folder_path, driveFolderId);
+    this.folderIdCache.set(cleanName, driveFolderId);
+    await SupabaseService.persistMediaFolder(folderRecord).catch(() => {});
+
+    return {
+      id: folderRecord.id,
+      name: folderRecord.folder_name,
+      path: folderRecord.folder_path,
+      driveFolderId: folderRecord.drive_folder_id,
+      driveWebUrl: folderRecord.drive_web_url,
+      isDefault: folderRecord.is_system_created,
+      created_at: folderRecord.created_at
+    };
+  }
+
+  static async deleteUserPersonalSubfolder(
+    user: { id: string; full_name: string; roles: UserRole[] },
+    driveFolderId: string
+  ): Promise<{ success: boolean }> {
+    const idx = db.mediaFolders.findIndex(
+      f => f.drive_folder_id === driveFolderId && f.user_id === user.id
+    );
+    if (idx === -1) {
+      throw new Error('Personal folder not found or you do not have permission to delete it.');
+    }
+
+    const folderRecord = db.mediaFolders[idx];
+    if (folderRecord.is_system_created) {
+      throw new Error('Default role root folders cannot be deleted. You can add or delete custom subfolders.');
+    }
+
+    const token = await this.getValidAccessToken();
+    if (token && !driveFolderId.startsWith('user-drive-') && !driveFolderId.startsWith('sub-')) {
+      try {
+        await fetch(`https://www.googleapis.com/drive/v3/files/${driveFolderId}?supportsAllDrives=true`, {
+          method: 'PATCH',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ trashed: true })
+        });
+        console.log(`[DriveService] Trashed personal folder "${folderRecord.folder_name}" in Google Drive`);
+      } catch (err: any) {
+        console.warn(`[DriveService] Drive trash error: ${err.message}`);
+      }
+    }
+
+    db.mediaFolders.splice(idx, 1);
+    this.folderIdCache.delete(folderRecord.folder_path);
+    await SupabaseService.deleteMediaFolder(folderRecord.id).catch(() => {});
+
+    return { success: true };
   }
 }
 

@@ -193,6 +193,31 @@ export interface MediaFolder {
   drive_web_url: string;
   is_system_created: boolean;
   created_at: string;
+  user_id?: string;
+  user_name?: string;
+  parent_folder_id?: string;
+  role?: UserRole;
+  is_personal?: boolean;
+}
+
+export interface PersonalSubfolder {
+  id: string;
+  name: string;
+  path: string;
+  driveFolderId: string;
+  driveWebUrl: string;
+  isDefault: boolean;
+  created_at: string;
+}
+
+export interface PersonalDriveInfo {
+  userId: string;
+  userName: string;
+  role: UserRole;
+  personalRootFolderId: string;
+  personalRootFolderUrl: string;
+  personalRootPath: string;
+  subfolders: PersonalSubfolder[];
 }
 
 export interface EditingProject {

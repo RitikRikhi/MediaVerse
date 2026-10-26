@@ -9,7 +9,9 @@ import {
   Approval,
   InAppNotification,
   CoordinatorMetrics,
-  UserRole
+  UserRole,
+  PersonalDriveInfo,
+  PersonalSubfolder
 } from '../types';
 
 const BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
@@ -382,6 +384,31 @@ class ApiClient {
   async disconnectDrive(): Promise<any> {
     return this.request<any>('/drive/disconnect', {
       method: 'POST'
+    });
+  }
+
+  // Personal User Drive
+  async getMyDrive(): Promise<PersonalDriveInfo> {
+    return this.request<PersonalDriveInfo>('/drive/my-drive');
+  }
+
+  async addMyPersonalFolder(folderName: string, parentFolderId?: string): Promise<PersonalSubfolder> {
+    return this.request<PersonalSubfolder>('/drive/my-drive/folders', {
+      method: 'POST',
+      body: JSON.stringify({ folderName, parentFolderId })
+    });
+  }
+
+  async renameMyPersonalFolder(folderId: string, newName: string): Promise<PersonalSubfolder> {
+    return this.request<PersonalSubfolder>(`/drive/my-drive/folders/${folderId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ newName })
+    });
+  }
+
+  async deleteMyPersonalFolder(folderId: string): Promise<{ success: boolean }> {
+    return this.request<{ success: boolean }>(`/drive/my-drive/folders/${folderId}`, {
+      method: 'DELETE'
     });
   }
 
