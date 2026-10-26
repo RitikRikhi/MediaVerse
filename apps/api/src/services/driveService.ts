@@ -142,26 +142,40 @@ export class DriveService {
   }
 
   static async refreshAccessToken(): Promise<string | null> {
-    if (!this.tokenState.refreshToken) {
+    let cleanToken = (this.tokenState.refreshToken || '').trim();
+    while (
+      (cleanToken.startsWith('"') && cleanToken.endsWith('"')) ||
+      (cleanToken.startsWith("'") && cleanToken.endsWith("'")) ||
+      (cleanToken.startsWith('`') && cleanToken.endsWith('`'))
+    ) {
+      cleanToken = cleanToken.slice(1, -1).trim();
+    }
+    if ((cleanToken.startsWith('\\"') && cleanToken.endsWith('\\"')) || (cleanToken.startsWith("\\'") && cleanToken.endsWith("\\'"))) {
+      cleanToken = cleanToken.slice(2, -2).trim();
+    }
+
+    if (!cleanToken) {
       console.warn('[DriveService] No refresh token available to refresh access token.');
       return null;
     }
+    this.tokenState.refreshToken = cleanToken;
+
     try {
-      console.log('[DriveService] Refreshing Google Drive OAuth access token...');
+      console.log(`[DriveService] Refreshing Google Drive OAuth access token (Token length: ${cleanToken.length}, starts with: ${cleanToken.slice(0, 7)}..., clientId length: ${config.google.clientId.length})...`);
       const response = await fetch('https://oauth2.googleapis.com/token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
           client_id: config.google.clientId,
           client_secret: config.google.clientSecret,
-          refresh_token: this.tokenState.refreshToken,
+          refresh_token: cleanToken,
           grant_type: 'refresh_token'
         })
       });
 
       if (!response.ok) {
         const err = await response.text();
-        console.warn('[DriveService] Token refresh rejected by Google:', err);
+        console.warn(`[DriveService] Token refresh rejected by Google (${response.status}):`, err);
         return null;
       }
 
