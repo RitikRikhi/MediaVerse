@@ -1,10 +1,26 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
+let rawClientId = (process.env.GOOGLE_CLIENT_ID || '').trim();
+if (rawClientId.endsWith('.apps.googleusercontent.')) {
+  rawClientId = rawClientId + 'com';
+} else if (rawClientId.endsWith('.apps.googleusercontent')) {
+  rawClientId = rawClientId + '.com';
+}
+
+const rawClientSecret = (process.env.GOOGLE_CLIENT_SECRET || '').trim();
+
+const isProd = process.env.NODE_ENV === 'production';
+const apiBase = (process.env.API_BASE_URL || (isProd ? 'https://mediaverse-3p89.onrender.com' : 'http://localhost:3001')).replace(/\/$/, '');
+const defaultRedirect = `${apiBase}/api/v1/drive/oauth2callback`;
+const redirectUri = (process.env.GOOGLE_REDIRECT_URI || '').trim() || defaultRedirect;
+
+const appBaseUrl = (process.env.APP_BASE_URL || '').trim() || (isProd ? 'https://media-verse-nine.vercel.app' : 'http://localhost:5173');
+
 export const config = {
   env: process.env.NODE_ENV || 'development',
   port: parseInt(process.env.PORT || '3001', 10),
-  appBaseUrl: process.env.APP_BASE_URL || 'http://localhost:5173',
+  appBaseUrl,
   devJwtSecret: process.env.DEV_JWT_SECRET || 'mediaverse-dev-super-secret-key-change-in-prod',
   
   // Supabase (Optional in local development)
@@ -16,12 +32,14 @@ export const config = {
 
   // Google Drive
   google: {
-    clientId: process.env.GOOGLE_CLIENT_ID || '',
-    clientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
-    redirectUri: process.env.GOOGLE_REDIRECT_URI || 'http://localhost:3001/api/v1/drive/oauth2callback',
-    rootFolderId: process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID || '1SdY0hIYAiYGL0DFzyeVjLOssg7sEdSP4',
-    rootFolderUrl: process.env.GOOGLE_DRIVE_ROOT_FOLDER_URL || 'https://drive.google.com/drive/u/0/folders/1SdY0hIYAiYGL0DFzyeVjLOssg7sEdSP4',
-    isConfigured: Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET)
+    clientId: rawClientId,
+    clientSecret: rawClientSecret,
+    redirectUri,
+    rootFolderId: process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID || '1PNvblS0BffXR12av3dC7fP7wNdf948kO',
+    rootFolderUrl: process.env.GOOGLE_DRIVE_ROOT_FOLDER_URL || 'https://drive.google.com/drive/folders/1PNvblS0BffXR12av3dC7fP7wNdf948kO',
+    refreshToken: (process.env.GOOGLE_DRIVE_REFRESH_TOKEN || '').trim(),
+    userEmail: (process.env.GOOGLE_DRIVE_USER_EMAIL || '').trim(),
+    isConfigured: Boolean(rawClientId && rawClientSecret)
   },
 
   // Gemini AI

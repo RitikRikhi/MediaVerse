@@ -85,6 +85,22 @@ export class DriveService {
 
   static init(): void {
     this.loadTokensFromDisk();
+
+    // If no tokens on disk, auto-hydrate with configured master refresh token
+    if (!this.tokenState.refreshToken && config.google.refreshToken) {
+      this.tokenState = {
+        ...this.tokenState,
+        refreshToken: config.google.refreshToken,
+        userEmail: config.google.userEmail || 'rikhiritik8@gmail.com',
+        activeRootFolderId: config.google.rootFolderId,
+        activeRootFolderUrl: config.google.rootFolderUrl,
+        connectedAt: new Date().toISOString()
+      };
+      console.log(`[DriveService] Initialized Google Drive with master refresh token for ${this.tokenState.userEmail}`);
+      this.refreshAccessToken().catch(err => {
+        console.warn('[DriveService] Initial master token refresh warning:', err.message);
+      });
+    }
   }
 
   static loadTokensFromDisk(): void {
