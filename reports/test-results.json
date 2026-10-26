@@ -1,0 +1,80 @@
+{
+  "testRunId": "TEST_DMV_20261026_RUN01",
+  "timestamp": "2026-10-26T07:48:00.000Z",
+  "targetEvent": "SAVISKAR 2026",
+  "organization": "DSA Media Crew, CGC University",
+  "summary": {
+    "totalPlanned": 35,
+    "totalExecuted": 35,
+    "passed": 35,
+    "failed": 0,
+    "blocked": 0,
+    "notImplemented": 0,
+    "successRate": "100.0%",
+    "defectsIdentified": 5,
+    "defectsResolved": 5,
+    "remainingDefects": 0
+  },
+  "testSuites": [
+    {
+      "name": "apps/api/test/extreme-e2e.test.ts",
+      "tests": 27,
+      "passed": 27,
+      "failed": 0,
+      "durationMs": 7357,
+      "results": [
+        { "id": "SEC-01", "name": "3.1 should reject unauthenticated requests with HTTP 401", "status": "PASS" },
+        { "id": "RBAC-01", "name": "3.2 should allow Media Coordinator to provision Drive structure (HTTP 201)", "status": "PASS" },
+        { "id": "RBAC-02", "name": "3.3 [NEGATIVE] Photographer attempting Coordinator-only action should be rejected with HTTP 403", "status": "PASS" },
+        { "id": "RBAC-03", "name": "3.4 [NEGATIVE] Videographer attempting to submit review approval should be rejected with HTTP 403", "status": "PASS" },
+        { "id": "RBAC-04", "name": "3.5 should allow Reviewer persona to access review workflows", "status": "PASS" },
+        { "id": "DB-01", "name": "4.1 should create an assignment and persist it to Supabase Cloud", "status": "PASS" },
+        { "id": "DB-02", "name": "4.2 should update status and verify Supabase Cloud record updates", "status": "PASS" },
+        { "id": "DB-03", "name": "4.3 [NEGATIVE] Invalid status transition should be rejected with HTTP 400 or 403", "status": "PASS" },
+        { "id": "DRIVE-01", "name": "5.1 should validate valid Google Drive URL and extract resource ID", "status": "PASS" },
+        { "id": "DRIVE-02", "name": "5.2 [NEGATIVE] Invalid Drive URL format should be rejected", "status": "PASS" },
+        { "id": "DRIVE-03", "name": "5.3 should automatically resolve Day 1 Photo upload to Photography subfolder", "status": "PASS" },
+        { "id": "DRIVE-04", "name": "5.4 should automatically resolve Day 2 Raw Video to Raw Videography subfolder", "status": "PASS" },
+        { "id": "DRIVE-05", "name": "5.5 should provide OAuth Auth URL for Google Drive authorization", "status": "PASS" },
+        { "id": "CREW-01", "name": "6.1 should allow photographer to toggle required shot checklist items", "status": "PASS" },
+        { "id": "CREW-02", "name": "7.1 should register uploaded video media asset and persist to Supabase", "status": "PASS" },
+        { "id": "EDIT-01", "name": "8.1 should allow editor to submit a new cut version (v1 Rough Cut)", "status": "PASS" },
+        { "id": "REV-01", "name": "9.1 should allow reviewer to add a timecoded review comment", "status": "PASS" },
+        { "id": "REV-02", "name": "9.2 should process final review approval and finalize deliverable status", "status": "PASS" },
+        { "id": "AI-01", "name": "10.1 should verify active model and zero-budget protection active", "status": "PASS" },
+        { "id": "AI-02", "name": "10.2 should generate AI shot list and utilize in-memory semantic cache on duplicate query", "status": "PASS" },
+        { "id": "AI-03", "name": "10.3 should apply AI generated shotlist directly to assignment checklist in Supabase", "status": "PASS" },
+        { "id": "MEDIA-01", "name": "11.1 should filter media library by media type and event day", "status": "PASS" },
+        { "id": "DASH-01", "name": "12.1 should compute dynamic dashboard metrics matching persistent data", "status": "PASS" },
+        { "id": "NOTIF-01", "name": "13.1 should record notifications for assigned events", "status": "PASS" },
+        { "id": "SEC-02", "name": "16.1 should safely handle XSS script payload in inputs without executing", "status": "PASS" },
+        { "id": "SEC-03", "name": "16.2 [NEGATIVE] Malformed UUID parameters should be rejected gracefully", "status": "PASS" },
+        { "id": "SEC-04", "name": "16.3 should ensure API responses never leak sensitive secrets or API keys", "status": "PASS" }
+      ]
+    },
+    {
+      "name": "apps/api/test/workflow.test.ts",
+      "tests": 8,
+      "passed": 8,
+      "failed": 0,
+      "durationMs": 19046,
+      "results": [
+        { "id": "WF-01", "name": "should initialize with all 7 pre-seeded roles and SAVISKAR 2026 event", "status": "PASS" },
+        { "id": "WF-02", "name": "should create an assignment with required fields and shot checklists", "status": "PASS" },
+        { "id": "WF-03", "name": "should enforce valid status transitions and prevent illegal leaps", "status": "PASS" },
+        { "id": "WF-04", "name": "should register media asset with Google Drive reference without loading server memory", "status": "PASS" },
+        { "id": "WF-05", "name": "should manage editing project versioning and review comment thread", "status": "PASS" },
+        { "id": "WF-06", "name": "should validate Google Drive URLs and extract resource IDs", "status": "PASS" },
+        { "id": "WF-07", "name": "should provision standardized SAVISKAR folder hierarchy", "status": "PASS" },
+        { "id": "WF-08", "name": "should provide complete operational shotlists and briefs with intelligent fallback", "status": "PASS" }
+      ]
+    }
+  ],
+  "integrations": {
+    "supabaseCloudPostgres": { "configured": true, "verified": true, "status": "REAL_INTEGRATION_PASSED" },
+    "googleDriveStorage": { "configured": true, "verified": true, "status": "REAL_INTEGRATION_PASSED", "rootFolderId": "1SdY0hIYAiYGL0DFzyeVjLOssg7sEdSP4" },
+    "googleDriveOAuth": { "configured": true, "verified": true, "status": "OAUTH_URL_VERIFIED_REQUIRES_USER_CONSENT" },
+    "geminiCloudAI": { "configured": true, "verified": true, "status": "REAL_INTEGRATION_PASSED", "model": "gemini-3.5-flash-lite", "rateLimit": "12 RPM", "semanticCache": true, "deterministicFallback": true }
+  },
+  "releaseRecommendation": "READY FOR LIMITED PRODUCTION USE"
+}
