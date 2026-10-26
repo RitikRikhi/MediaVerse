@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { db } from '../src/db/memoryStore';
+import { supabase } from '../src/db/client';
 import { SupabaseService } from '../src/services/supabaseService';
 import { DriveService } from '../src/services/driveService';
 import { AIService } from '../src/services/aiService';

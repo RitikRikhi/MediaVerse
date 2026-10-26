@@ -474,7 +474,7 @@ export const TutorialPage: React.FC = () => {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {activeTutorial.workflow.map(item => (
+          {activeTutorial.workflow.map((item: { step: string; title: string; desc: string; tip?: string }) => (
             <div
               key={item.step}
               className="p-5 rounded-2xl bg-white border border-slate-200/80 shadow-xs space-y-2.5 relative overflow-hidden group hover:border-slate-300 transition-all"
@@ -510,7 +510,7 @@ export const TutorialPage: React.FC = () => {
           </div>
 
           <div className="space-y-3">
-            {activeTutorial.proTips.map((tip, idx) => (
+            {activeTutorial.proTips.map((tip: string, idx: number) => (
               <div key={idx} className="flex items-start gap-2.5 text-xs text-slate-700">
                 <div className="w-5 h-5 rounded-full bg-red-100 text-red-700 font-bold flex items-center justify-center shrink-0 text-[10px] mt-0.5">
                   {idx + 1}
@@ -529,7 +529,7 @@ export const TutorialPage: React.FC = () => {
           </div>
 
           <div className="space-y-2.5">
-            {activeTutorial.recommendedGear.map((gear, idx) => (
+            {activeTutorial.recommendedGear.map((gear: string, idx: number) => (
               <div key={idx} className="p-3 rounded-xl bg-slate-50 border border-slate-200/80 text-xs text-slate-800 flex items-center gap-2.5 font-medium">
                 <div className="w-2 h-2 rounded-full bg-red-600 shrink-0" />
                 <span>{gear}</span>

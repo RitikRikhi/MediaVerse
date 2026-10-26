@@ -12,11 +12,13 @@
     "dev:web": "npm run dev -w @mediaverse/web",
     "dev:api": "npm run dev -w @mediaverse/api",
     "build": "npm run build --workspaces",
+    "build:api": "npm run build -w @mediaverse/shared-types && npm run build -w @mediaverse/api",
+    "build:web": "npm run build -w @mediaverse/shared-types && npm run build -w @mediaverse/web",
     "typecheck": "npm run typecheck --workspaces",
     "test": "npm run test --workspaces",
     "lint": "npm run lint --workspaces"
   },
-  "devDependencies": {
+  "dependencies": {
     "typescript": "^5.4.5"
   }
 }
