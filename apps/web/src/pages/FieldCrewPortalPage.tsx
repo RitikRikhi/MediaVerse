@@ -5,6 +5,7 @@ import { Assignment, ShotChecklistItem, MediaType, MediaAsset } from '../types';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { PriorityBadge } from '../components/ui/PriorityBadge';
 import { Modal } from '../components/ui/Modal';
+import { optimizeImageFile } from '../lib/imageOptimizer';
 import {
   Camera,
   Film,
@@ -19,19 +20,29 @@ import {
   RefreshCw,
   ExternalLink,
   Trash2,
-  AlertTriangle
+  AlertTriangle,
+  Zap,
+  Sparkles,
+  RotateCcw,
+  ShieldCheck,
+  Image as ImageIcon,
+  Check
 } from 'lucide-react';
 
 interface QueuedFile {
   id: string;
   file: File;
+  originalFile: File;
+  originalSize: number;
   previewUrl?: string;
   mediaType: MediaType;
-  status: 'QUEUED' | 'UPLOADING' | 'COMPLETED' | 'FAILED';
+  status: 'QUEUED' | 'OPTIMIZING' | 'UPLOADING' | 'COMPLETED' | 'FAILED';
   progress: number;
   error?: string;
   driveWebUrl?: string;
   driveFolderUrl?: string;
+  isOptimized?: boolean;
+  reductionPercent?: number;
 }
 
 export const FieldCrewPortalPage: React.FC = () => {
@@ -41,8 +52,16 @@ export const FieldCrewPortalPage: React.FC = () => {
   const [assignedMedia, setAssignedMedia] = useState<MediaAsset[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Upload Modal State
-  const [showUploadModal, setShowUploadModal] = useState(false);
+  // Active view tab inside the workspace: 'upload' | 'checklist' | 'media'
+  const [activeTab, setActiveTab] = useState<'upload' | 'checklist' | 'media'>('upload');
+
+  // Day filter for left task list
+  const [dayFilter, setDayFilter] = useState<'ALL' | 'DAY_1' | 'DAY_2'>('ALL');
+
+  // Turbo Event Compression Mode (On by default for high-speed event Wi-Fi uploads)
+  const [turboMode, setTurboMode] = useState<boolean>(true);
+
+  // Upload Queue State
   const [uploadFiles, setUploadFiles] = useState<QueuedFile[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadSummaryMessage, setUploadSummaryMessage] = useState('');
@@ -51,8 +70,11 @@ export const FieldCrewPortalPage: React.FC = () => {
   const [selectedFolderId, setSelectedFolderId] = useState<string>('');
   const [selectedFolderPath, setSelectedFolderPath] = useState<string>('');
   const [driveStatus, setDriveStatus] = useState<any>(null);
+  const [showFolderModal, setShowFolderModal] = useState<boolean>(false);
   const [authSuccessBanner, setAuthSuccessBanner] = useState<boolean>(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const dropzoneRef = useRef<HTMLDivElement>(null);
 
   const loadAssignments = async () => {
     try {
@@ -104,7 +126,6 @@ export const FieldCrewPortalPage: React.FC = () => {
   useEffect(() => {
     loadAssignments();
 
-    // Check if returning from Google OAuth redirect
     const query = new URLSearchParams(window.location.search);
     if (query.get('connected') === 'true') {
       setAuthSuccessBanner(true);
@@ -145,46 +166,112 @@ export const FieldCrewPortalPage: React.FC = () => {
     }
   };
 
-  const handleFilesSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!e.target.files || e.target.files.length === 0) return;
-
-    const files = Array.from(e.target.files);
-    const newQueue: QueuedFile[] = files.map(file => {
-      const isVideo = file.type.startsWith('video/') || /\.(mp4|mov|mkv|avi|m4v)$/i.test(file.name);
-      const isPhoto = file.type.startsWith('image/') || /\.(jpg|jpeg|png|heic|raw|cr2|nef|arw)$/i.test(file.name);
-      const mediaType: MediaType = isVideo ? 'RAW_VIDEO' : isPhoto ? 'RAW_PHOTO' : 'OTHER';
-
-      let previewUrl: string | undefined;
-      if (isPhoto) {
-        previewUrl = URL.createObjectURL(file);
-      }
-
-      return {
-        id: `${file.name}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        file,
-        previewUrl,
-        mediaType,
-        status: 'QUEUED',
-        progress: 0
-      };
-    });
-
-    setUploadFiles(prev => [...prev, ...newQueue]);
-    if (fileInputRef.current) fileInputRef.current.value = '';
-  };
-
-  const handleRemoveQueuedFile = (id: string) => {
-    setUploadFiles(prev => prev.filter(f => f.id !== id));
-  };
-
-  const formatFileSize = (bytes: number): string => {
-    if (bytes === 0) return '0 B';
+  const formatFileSize = (bytes?: number): string => {
+    if (!bytes || bytes === 0) return '0 B';
     const k = 1024;
     const sizes = ['B', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
   };
 
+  // Add files to queue and optimize if Turbo Mode is enabled
+  const handleFilesSelected = async (e: React.ChangeEvent<HTMLInputElement> | { target: { files: File[] } }) => {
+    const rawFiles = e.target.files ? Array.from(e.target.files) : [];
+    if (rawFiles.length === 0) return;
+    if (fileInputRef.current) fileInputRef.current.value = '';
+
+    const newQueued: QueuedFile[] = rawFiles.map(file => {
+      const isVideo = file.type.startsWith('video/') || /\.(mp4|mov|mkv|avi|m4v)$/i.test(file.name);
+      const isPhoto = file.type.startsWith('image/') || /\.(jpg|jpeg|png|heic|raw|cr2|nef|arw)$/i.test(file.name);
+      const mediaType: MediaType = isVideo ? 'RAW_VIDEO' : isPhoto ? 'RAW_PHOTO' : 'OTHER';
+
+      return {
+        id: `${file.name}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        file,
+        originalFile: file,
+        originalSize: file.size,
+        previewUrl: isPhoto ? URL.createObjectURL(file) : undefined,
+        mediaType,
+        status: turboMode && isPhoto ? 'OPTIMIZING' : 'QUEUED',
+        progress: 0
+      };
+    });
+
+    setUploadFiles(prev => [...prev, ...newQueued]);
+    setActiveTab('upload');
+
+    // Run client-side optimization in background
+    if (turboMode) {
+      for (const item of newQueued) {
+        if (item.mediaType === 'RAW_PHOTO') {
+          try {
+            const opt = await optimizeImageFile(item.file);
+            setUploadFiles(prev =>
+              prev.map(f => {
+                if (f.id === item.id) {
+                  return {
+                    ...f,
+                    file: opt.file,
+                    previewUrl: opt.previewUrl || f.previewUrl,
+                    isOptimized: opt.isOptimized,
+                    reductionPercent: opt.reductionPercent,
+                    status: 'QUEUED'
+                  };
+                }
+                return f;
+              })
+            );
+          } catch {
+            setUploadFiles(prev =>
+              prev.map(f => (f.id === item.id ? { ...f, status: 'QUEUED' } : f))
+            );
+          }
+        }
+      }
+    }
+  };
+
+  const handleRemoveQueuedFile = (id: string) => {
+    setUploadFiles(prev => prev.filter(f => f.id !== id));
+  };
+
+  // Upload single file with auto-retry
+  const uploadSingleFileWithRetry = async (
+    item: QueuedFile,
+    assignment: Assignment,
+    maxRetries = 2
+  ): Promise<{ success: boolean; data?: any; error?: string }> => {
+    let attempts = 0;
+    while (attempts <= maxRetries) {
+      try {
+        const formData = new FormData();
+        formData.append('file', item.file);
+        formData.append('assignment_id', assignment.id);
+        formData.append('event_id', assignment.event_id);
+        formData.append('media_type', item.mediaType);
+        formData.append('description', `Uploaded for ${assignment.title}`);
+        formData.append('target_folder_id', selectedFolderId || '');
+        formData.append('target_folder_path', selectedFolderPath || '');
+
+        const result = await api.uploadMediaFile(formData, (percent) => {
+          setUploadFiles(prev =>
+            prev.map(f => (f.id === item.id ? { ...f, progress: percent } : f))
+          );
+        });
+
+        return { success: true, data: result };
+      } catch (err: any) {
+        attempts++;
+        if (attempts > maxRetries) {
+          return { success: false, error: err.message || 'Upload failed after retries' };
+        }
+        await new Promise(r => setTimeout(r, 1200));
+      }
+    }
+    return { success: false, error: 'Upload failed' };
+  };
+
+  // High-Speed Concurrent Upload Pipeline (2 Parallel Streams)
   const handleStartUpload = async () => {
     if (!selectedAssignment || uploadFiles.length === 0) return;
 
@@ -196,73 +283,65 @@ export const FieldCrewPortalPage: React.FC = () => {
     setIsUploading(true);
     setUploadSummaryMessage('');
 
-    let successCount = 0;
-    let failCount = 0;
+    const pending = uploadFiles.filter(f => f.status === 'QUEUED' || f.status === 'FAILED');
+    const concurrency = 2; // 2 files uploading in parallel for max throughput
+    let currentIndex = 0;
+    let completedCount = 0;
 
-    for (let i = 0; i < uploadFiles.length; i++) {
-      const item = uploadFiles[i];
-      if (item.status === 'COMPLETED') continue;
+    const worker = async () => {
+      while (currentIndex < pending.length) {
+        const item = pending[currentIndex++];
+        if (!item) break;
 
-      setUploadFiles(prev =>
-        prev.map(f => (f.id === item.id ? { ...f, status: 'UPLOADING', progress: 10 } : f))
-      );
+        setUploadFiles(prev =>
+          prev.map(f => (f.id === item.id ? { ...f, status: 'UPLOADING', progress: 5 } : f))
+        );
 
-      try {
-        const formData = new FormData();
-        formData.append('file', item.file);
-        formData.append('assignment_id', selectedAssignment.id);
-        formData.append('event_id', selectedAssignment.event_id);
-        formData.append('media_type', item.mediaType);
-        formData.append('description', `Uploaded for ${selectedAssignment.title}`);
-        formData.append('target_folder_id', selectedFolderId || '');
-        formData.append('target_folder_path', selectedFolderPath || '');
+        const res = await uploadSingleFileWithRetry(item, selectedAssignment);
 
-        const result = await api.uploadMediaFile(formData, percent => {
+        if (res.success && res.data) {
+          completedCount++;
           setUploadFiles(prev =>
-            prev.map(f => (f.id === item.id ? { ...f, progress: percent } : f))
+            prev.map(f =>
+              f.id === item.id
+                ? {
+                    ...f,
+                    status: 'COMPLETED',
+                    progress: 100,
+                    driveWebUrl: res.data.asset?.drive_web_url,
+                    driveFolderUrl: res.data.destination?.driveFolderUrl
+                  }
+                : f
+            )
           );
-        });
-
-        setUploadFiles(prev =>
-          prev.map(f =>
-            f.id === item.id
-              ? {
-                  ...f,
-                  status: 'COMPLETED',
-                  progress: 100,
-                  driveWebUrl: result.asset.drive_web_url,
-                  driveFolderUrl: result.destination?.driveFolderUrl
-                }
-              : f
-          )
-        );
-        successCount++;
-      } catch (err: any) {
-        failCount++;
-        const errMsg = err.message || 'Upload failed';
-        if (errMsg.includes('GOOGLE_DRIVE_NOT_CONNECTED') || errMsg.includes('not connected')) {
-          setDriveStatus((prev: any) => ({ ...prev, isConnected: false }));
+        } else {
+          setUploadFiles(prev =>
+            prev.map(f =>
+              f.id === item.id
+                ? {
+                    ...f,
+                    status: 'FAILED',
+                    error: res.error || 'Upload failed'
+                  }
+                : f
+            )
+          );
         }
-        setUploadFiles(prev =>
-          prev.map(f =>
-            f.id === item.id
-              ? {
-                  ...f,
-                  status: 'FAILED',
-                  error: errMsg
-                }
-              : f
-          )
-        );
       }
+    };
+
+    const workers = [];
+    for (let i = 0; i < Math.min(concurrency, pending.length); i++) {
+      workers.push(worker());
     }
+    await Promise.all(workers);
 
     setIsUploading(false);
 
-    if (successCount > 0) {
+    if (completedCount > 0) {
       const folderTargetDisplay = selectedFolderPath || destinationFolderInfo?.fullPath || 'SAVISKAR 2026';
       setUploadSummaryMessage(
-        `Successfully uploaded and registered ${successCount} file(s) into Google Drive folder "${folderTargetDisplay}".`
+        `✓ Uploaded ${completedCount} file(s) into Google Drive folder "${folderTargetDisplay}".`
       );
       const updatedMedia = await api.getMediaAssets({ assignment_id: selectedAssignment.id });
       setAssignedMedia(updatedMedia);
@@ -271,93 +350,74 @@ export const FieldCrewPortalPage: React.FC = () => {
     }
   };
 
+  // Drag and drop handlers
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      handleFilesSelected({ target: { files: Array.from(e.dataTransfer.files) } });
+    }
+  };
+
+  // Calculate totals for optimization metrics
+  const totalOriginalBytes = uploadFiles.reduce((acc, f) => acc + f.originalSize, 0);
+  const totalUploadBytes = uploadFiles.reduce((acc, f) => acc + f.file.size, 0);
+  const totalSavedBytes = Math.max(0, totalOriginalBytes - totalUploadBytes);
+  const totalSavedMB = (totalSavedBytes / (1024 * 1024)).toFixed(1);
+
+  const pendingCount = uploadFiles.filter(f => f.status === 'QUEUED' || f.status === 'FAILED').length;
+  const completedCount = uploadFiles.filter(f => f.status === 'COMPLETED').length;
+
   const completedShotsCount = selectedAssignment?.checklist?.filter(c => c.is_completed).length || 0;
   const totalShotsCount = selectedAssignment?.checklist?.length || 0;
   const checklistProgressPercent = totalShotsCount > 0 ? Math.round((completedShotsCount / totalShotsCount) * 100) : 0;
 
+  // Filtered task list
+  const filteredAssignments = myAssignments.filter(a => {
+    if (dayFilter === 'DAY_1') return /day\s*1/i.test(a.day_session);
+    if (dayFilter === 'DAY_2') return /day\s*2/i.test(a.day_session);
+    return true;
+  });
+
   return (
-    <div className="space-y-6 animate-fade-in max-w-7xl mx-auto">
-      {/* Top Banner */}
-      <div className="p-6 rounded-2xl bg-white border border-slate-200/80 shadow-card flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+    <div className="space-y-6 animate-fade-in max-w-7xl mx-auto pb-12">
+      {/* Top Header Card */}
+      <div className="p-5 sm:p-6 rounded-2xl bg-white border border-slate-200/80 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-50 text-red-700 border border-red-200 uppercase tracking-wider">
-              Field Crew & Camera Operators
+            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-red-50 text-red-700 border border-red-200 uppercase tracking-wider">
+              SAVISKAR 2026 Media Ops
             </span>
-            <span className="text-xs text-slate-500 font-medium">• SAVISKAR 2026 Production</span>
+            <span className="text-xs text-slate-500 font-medium">• Field Crew Rapid Hub</span>
           </div>
           <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
-            Media Upload & Field Hub
+            Fast Camera Upload & Shotlist
           </h1>
           <p className="text-xs text-slate-500 mt-0.5">
-            Check off required shots and upload raw photos & 4K video clips directly to the official Google Drive folders.
+            1-Click upload for camera crew. Photos & 4K footage automatically stream into the official Google Drive folders.
           </p>
         </div>
 
-        <button
-          onClick={() => {
-            if (!user) {
-              setShowAuthModal(true);
-              return;
-            }
-            setUploadSummaryMessage('');
-            if (!selectedAssignment && myAssignments.length > 0) {
-              selectAssignment(myAssignments[0].id);
-            }
-            setShowUploadModal(true);
-          }}
-          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-700 text-white shadow-xs transition-colors self-start sm:self-auto"
-        >
-          <UploadCloud className="w-4 h-4" />
-          <span>Upload Media to Drive</span>
-        </button>
-      </div>
-
-      {/* Active Crew Identity & Upload Authentication Card */}
-      <div className={`p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs ${
-        user ? 'bg-slate-50 border-slate-200' : 'bg-amber-50/80 border-amber-300'
-      }`}>
+        {/* Live Google Drive Status Badge */}
         <div className="flex items-center gap-3">
-          <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-sm shrink-0 shadow-xs ${
-            user ? 'bg-red-600 text-white' : 'bg-amber-600 text-white'
-          }`}>
-            {user ? (user.full_name?.charAt(0) || 'C') : '?'}
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-slate-900">
-                {user ? `Uploading as: ${user.full_name}` : 'Not Signed In (Guest / Dev Mode)'}
+          {driveStatus?.isConnected ? (
+            <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-emerald-50 border border-emerald-200/90 text-xs">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="font-bold text-emerald-800">Drive Sync Active</span>
+              <span className="text-[10px] text-emerald-600 hidden md:inline font-mono">
+                ({driveStatus.userEmail || 'rikhiritik8@gmail.com'})
               </span>
-              {user?.roles?.[0] && (
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-800 border border-red-200 uppercase tracking-wider">
-                  {user.roles[0]}
-                </span>
-              )}
             </div>
-            <p className="text-[11px] text-slate-500 mt-0.5">
-              {user
-                ? `All media you upload will be permanently credited to "${user.full_name}" in database audit trails and uploaded to official Google Drive folders.`
-                : 'Sign in with your crew account so your photos and video clips are officially stamped with your name.'}
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2 shrink-0 self-start sm:self-auto">
-          {user ? (
-            <button
-              onClick={() => setShowAuthModal(true)}
-              className="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 shadow-xs transition-colors"
-            >
-              Switch Crew Account
-            </button>
           ) : (
-            <button
-              onClick={() => setShowAuthModal(true)}
-              className="px-4 py-2 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-xs transition-colors flex items-center gap-1.5"
-            >
-              <UploadCloud className="w-3.5 h-3.5" />
-              <span>Sign In / Join Crew</span>
-            </button>
+            <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-800 font-semibold">
+              <AlertTriangle className="w-4 h-4 text-amber-600" />
+              <span>Drive Sync Offline</span>
+            </div>
           )}
         </div>
       </div>
@@ -367,12 +427,7 @@ export const FieldCrewPortalPage: React.FC = () => {
         <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-300 text-xs text-emerald-900 flex items-center justify-between gap-3 shadow-xs animate-fade-in">
           <div className="flex items-center gap-2.5">
             <CheckCircle className="w-5 h-5 text-emerald-600 shrink-0" />
-            <div>
-              <span className="font-bold">Google Drive Connected Successfully!</span>
-              <p className="text-[11px] text-emerald-700 mt-0.5">
-                Your Google account is authorized. Photos and footage will now upload directly into the official SAVISKAR 2026 Google Drive folder structure.
-              </p>
-            </div>
+            <span className="font-bold">Google Drive Connected Successfully! Files will stream directly into official folders.</span>
           </div>
           <button
             onClick={() => setAuthSuccessBanner(false)}
@@ -383,216 +438,441 @@ export const FieldCrewPortalPage: React.FC = () => {
         </div>
       )}
 
-      {/* Google Drive Integration Status Bar */}
-      {driveStatus && (
-        driveStatus.isConnected ? (
-          <div className="p-4 rounded-2xl bg-white border border-emerald-200/80 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-600 flex items-center justify-center shrink-0">
-                <CheckCircle className="w-4 h-4" />
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="font-bold text-slate-900">Google Drive Live Sync Active</span>
-                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                    Connected
-                  </span>
-                </div>
-                <p className="text-slate-500 text-[11px] mt-0.5">
-                  Direct upload target: <span className="font-semibold text-slate-800">DSA MEDIAVERSE SAVISKAR 26</span> {driveStatus.userEmail ? `(${driveStatus.userEmail})` : ''}
-                </p>
-              </div>
-            </div>
-            <a
-              href={driveStatus.rootFolderUrl || 'https://drive.google.com/drive/folders/1PNvblS0BffXR12av3dC7fP7wNdf948kO'}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 text-xs font-semibold transition-colors self-start sm:self-auto shrink-0"
-            >
-              <span>Open Drive Root</span>
-              <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
-            </a>
-          </div>
-        ) : (
-          <div className="p-4 rounded-2xl bg-amber-50/80 border border-amber-200/90 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs">
-            <div className="flex items-start gap-3">
-              <div className="w-8 h-8 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0 mt-0.5">
-                <AlertTriangle className="w-4 h-4" />
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="font-bold text-amber-950 text-sm">Google Drive Connection Required</span>
-                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-200/80 text-amber-900">
-                    Upload Authorization
-                  </span>
-                </div>
-                <p className="text-amber-800 text-xs mt-0.5 leading-relaxed max-w-2xl">
-                  To ensure photos and 4K footage stream into the official SAVISKAR 2026 Drive folder, camera crew must connect Google Drive before uploading.
-                </p>
-              </div>
-            </div>
-            {driveStatus.authUrl && (
-              <a
-                href={driveStatus.authUrl}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-xs shadow-xs transition-colors self-start sm:self-auto shrink-0"
-              >
-                <UploadCloud className="w-4 h-4" />
-                <span>Connect Google Drive &rarr;</span>
-              </a>
-            )}
-          </div>
-        )
-      )}
-
-      {/* Grid: My Assignments List + Selected Assignment Workspace */}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        {/* Left Column: Assignments Selector */}
-        <div className="space-y-3">
+      {/* Main Two-Column Workflow */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* Left Column: Tasks / Assignments List (4 cols) */}
+        <div className="lg:col-span-4 space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-xs font-bold uppercase tracking-wider text-slate-500">
-              My Coverage Tasks
+              Coverage Tasks ({filteredAssignments.length})
             </h2>
-            <span className="text-xs font-bold text-slate-700">{myAssignments.length} active</span>
+
+            {/* Quick Day Switcher */}
+            <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-[11px] font-bold">
+              <button
+                onClick={() => setDayFilter('ALL')}
+                className={`px-2 py-0.5 rounded-lg transition-colors ${
+                  dayFilter === 'ALL' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                All
+              </button>
+              <button
+                onClick={() => setDayFilter('DAY_1')}
+                className={`px-2 py-0.5 rounded-lg transition-colors ${
+                  dayFilter === 'DAY_1' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Day 1
+              </button>
+              <button
+                onClick={() => setDayFilter('DAY_2')}
+                className={`px-2 py-0.5 rounded-lg transition-colors ${
+                  dayFilter === 'DAY_2' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Day 2
+              </button>
+            </div>
           </div>
 
           {isLoading ? (
             <div className="p-8 text-center text-xs text-slate-400 bg-white rounded-2xl border border-slate-200">
               <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-red-600" />
-              Loading assigned tasks...
+              Loading tasks...
             </div>
-          ) : myAssignments.length === 0 ? (
+          ) : filteredAssignments.length === 0 ? (
             <div className="p-6 text-center rounded-2xl bg-white border border-slate-200 text-xs text-slate-500">
-              No assignments assigned to you yet. Check the Assignments page.
+              No tasks found for this filter.
             </div>
           ) : (
-            myAssignments.map(a => {
-              const isSelected = selectedAssignment?.id === a.id;
-              return (
-                <div
-                  key={a.id}
-                  onClick={() => selectAssignment(a.id)}
-                  className={`p-4 rounded-2xl border cursor-pointer transition-all ${
-                    isSelected
-                      ? 'bg-red-50/50 border-red-300 shadow-xs'
-                      : 'bg-white border-slate-200/80 hover:border-slate-300 hover:bg-slate-50/50'
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-2 mb-2">
-                    <PriorityBadge priority={a.priority} />
-                    <StatusBadge status={a.status} size="sm" />
-                  </div>
-                  <h3 className="text-sm font-bold text-slate-900 leading-snug">{a.title}</h3>
-                  <div className="mt-2.5 text-xs text-slate-500 space-y-1">
-                    <div className="flex items-center gap-1.5">
-                      <MapPin className="w-3.5 h-3.5 text-slate-400" />
-                      <span>{a.location_name || 'Main Campus'}</span>
+            <div className="space-y-2.5 max-h-[720px] overflow-y-auto pr-1">
+              {filteredAssignments.map(a => {
+                const isSelected = selectedAssignment?.id === a.id;
+                return (
+                  <div
+                    key={a.id}
+                    onClick={() => selectAssignment(a.id)}
+                    className={`p-4 rounded-2xl border cursor-pointer transition-all ${
+                      isSelected
+                        ? 'bg-red-50/60 border-red-500 shadow-xs ring-1 ring-red-500'
+                        : 'bg-white border-slate-200/90 hover:border-slate-300 hover:bg-slate-50/70 shadow-2xs'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <PriorityBadge priority={a.priority} />
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-700">
+                          {a.coverage_type}
+                        </span>
+                        <StatusBadge status={a.status} size="sm" />
+                      </div>
                     </div>
-                    <div className="flex items-center gap-1.5">
-                      <Clock className="w-3.5 h-3.5 text-slate-400" />
-                      <span>{a.day_session}</span>
+                    <h3 className="text-sm font-bold text-slate-900 leading-snug">{a.title}</h3>
+                    <div className="mt-2 text-xs text-slate-500 flex items-center justify-between gap-2">
+                      <span className="flex items-center gap-1 truncate">
+                        <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                        <span className="truncate">{a.location_name || 'Main Campus'}</span>
+                      </span>
+                      <span className="font-semibold text-slate-700 shrink-0 font-mono text-[11px]">
+                        {a.day_session}
+                      </span>
                     </div>
                   </div>
-                </div>
-              );
-            })
+                );
+              })}
+            </div>
           )}
         </div>
 
-        {/* Right 2 Columns: Live Task Checklist & Uploaded Media */}
-        <div className="xl:col-span-2 space-y-6">
+        {/* Right Column: Unified Active Task Hub (8 cols) */}
+        <div className="lg:col-span-8 space-y-4">
           {selectedAssignment ? (
             <>
-              {/* Task Header & Specs Card */}
-              <div className="p-6 rounded-2xl bg-white border border-slate-200/80 shadow-card space-y-5">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
+              {/* Active Task Banner Card */}
+              <div className="p-5 sm:p-6 rounded-2xl bg-white border border-slate-200/80 shadow-xs space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-2 mb-1">
                       <PriorityBadge priority={selectedAssignment.priority} />
-                      <StatusBadge status={selectedAssignment.status} />
-                      <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-slate-100 text-slate-700">
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700 uppercase tracking-wider">
                         {selectedAssignment.coverage_type}
+                      </span>
+                      <span className="text-xs text-slate-500 font-mono font-semibold">
+                        {selectedAssignment.day_session}
                       </span>
                     </div>
                     <h2 className="text-xl font-bold text-slate-900">{selectedAssignment.title}</h2>
-                    <p className="text-xs text-slate-500 font-medium">
-                      {selectedAssignment.location_name} • {selectedAssignment.day_session}
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      📍 {selectedAssignment.location_name} • Deliverable: <span className="font-semibold text-slate-800">{selectedAssignment.expected_deliverable}</span>
                     </p>
                   </div>
 
-                  <div className="flex items-center gap-2 self-start sm:self-auto">
-                    {destinationFolderInfo?.driveFolderUrl && (
-                      <a
-                        href={destinationFolderInfo.driveFolderUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 transition-colors border border-slate-200"
-                        title="View folder in Google Drive"
-                      >
-                        <FolderOpen className="w-4 h-4 text-amber-500" />
-                        <span>Open Drive Folder</span>
-                        <ExternalLink className="w-3 h-3 text-slate-400" />
-                      </a>
-                    )}
-
-                    <button
-                      onClick={() => setShowUploadModal(true)}
-                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-700 text-white shadow-xs transition-colors"
+                  {destinationFolderInfo?.driveFolderUrl && (
+                    <a
+                      href={destinationFolderInfo.driveFolderUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200 self-start sm:self-auto shrink-0 transition-colors"
+                      title="Open destination in Google Drive"
                     >
-                      <UploadCloud className="w-4 h-4" />
-                      <span>Upload Files</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Destination Banner */}
-                {destinationFolderInfo && (
-                  <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 flex items-center justify-between text-xs">
-                    <div className="flex items-center gap-2 text-slate-700">
-                      <FolderOpen className="w-4 h-4 text-amber-500 shrink-0" />
-                      <span>Automated Destination:</span>
-                      <span className="font-mono font-semibold text-slate-900 bg-white px-2 py-0.5 rounded border border-slate-200">
-                        {destinationFolderInfo.fullPath}
-                      </span>
-                    </div>
-                    <span className="text-[11px] font-semibold text-emerald-700 flex items-center gap-1">
-                      <CheckCircle className="w-3.5 h-3.5" /> Auto-Mapped
-                    </span>
-                  </div>
-                )}
-
-                {/* Instructions Box */}
-                <div className="p-4 rounded-xl bg-slate-50/80 border border-slate-200/60 space-y-1.5">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                    Required Deliverable Brief
-                  </h4>
-                  <p className="text-xs text-slate-800 leading-relaxed font-medium">
-                    {selectedAssignment.expected_deliverable}
-                  </p>
-                  {selectedAssignment.notes && (
-                    <p className="text-xs text-slate-500 pt-1 border-t border-slate-200/60">
-                      <strong>Notes:</strong> {selectedAssignment.notes}
-                    </p>
+                      <FolderOpen className="w-4 h-4 text-amber-500" />
+                      <span>Open Drive Folder</span>
+                      <ExternalLink className="w-3 h-3 text-slate-400" />
+                    </a>
                   )}
                 </div>
 
-                {/* Interactive Shot Checklist */}
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">
-                        Required Shot Checklist ({completedShotsCount}/{totalShotsCount})
-                      </h3>
-                      <p className="text-[11px] text-slate-500">
-                        Tap each shot item as you complete it during coverage.
-                      </p>
+                {/* Tab Navigation: Upload, Checklist, Media */}
+                <div className="flex items-center gap-2 border-b border-slate-200 pt-1">
+                  <button
+                    onClick={() => setActiveTab('upload')}
+                    className={`flex items-center gap-2 pb-3 px-3 text-xs font-bold border-b-2 transition-colors ${
+                      activeTab === 'upload'
+                        ? 'border-red-600 text-red-600'
+                        : 'border-transparent text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    <UploadCloud className="w-4 h-4" />
+                    <span>Fast Upload</span>
+                    {uploadFiles.length > 0 && (
+                      <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-red-100 text-red-800">
+                        {uploadFiles.length}
+                      </span>
+                    )}
+                  </button>
+
+                  <button
+                    onClick={() => setActiveTab('checklist')}
+                    className={`flex items-center gap-2 pb-3 px-3 text-xs font-bold border-b-2 transition-colors ${
+                      activeTab === 'checklist'
+                        ? 'border-red-600 text-red-600'
+                        : 'border-transparent text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    <CheckSquare className="w-4 h-4" />
+                    <span>Shot Checklist ({completedShotsCount}/{totalShotsCount})</span>
+                  </button>
+
+                  <button
+                    onClick={() => setActiveTab('media')}
+                    className={`flex items-center gap-2 pb-3 px-3 text-xs font-bold border-b-2 transition-colors ${
+                      activeTab === 'media'
+                        ? 'border-red-600 text-red-600'
+                        : 'border-transparent text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    <ImageIcon className="w-4 h-4" />
+                    <span>Uploaded Media ({assignedMedia.length})</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* TAB 1: FAST IN-PAGE UPLOAD DROPZONE */}
+              {activeTab === 'upload' && (
+                <div className="space-y-4">
+                  {/* Turbo Event Mode Banner Toggle */}
+                  <div className="p-4 rounded-2xl bg-white border border-slate-200/80 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+                        turboMode ? 'bg-amber-500 text-white' : 'bg-slate-100 text-slate-600'
+                      }`}>
+                        <Zap className="w-5 h-5 fill-current" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-slate-900 text-xs">Turbo Event Upload Mode</span>
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                            turboMode
+                              ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                              : 'bg-slate-100 text-slate-600'
+                          }`}>
+                            {turboMode ? '90% Faster Wi-Fi Saver' : 'Full RAW Original'}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 mt-0.5">
+                          {turboMode
+                            ? 'Auto-downsamples 30MB+ photos to crisp 2.5K in browser. Blazes through congested event Wi-Fi in seconds.'
+                            : 'Uploads untouched byte-for-byte full-size files without any client-side compression.'}
+                        </p>
+                      </div>
                     </div>
 
-                    <div className="text-right">
-                      <span className="text-xs font-bold text-slate-900">{checklistProgressPercent}% Complete</span>
+                    <button
+                      onClick={() => setTurboMode(!turboMode)}
+                      className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all shrink-0 self-start sm:self-auto flex items-center gap-1.5 ${
+                        turboMode
+                          ? 'bg-amber-50 text-amber-900 border border-amber-300 hover:bg-amber-100'
+                          : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                      }`}
+                    >
+                      <span>{turboMode ? '⚡ Turbo Mode ON' : 'Switch to Turbo Mode'}</span>
+                    </button>
+                  </div>
+
+                  {/* Drag & Drop Upload Card */}
+                  <div
+                    ref={dropzoneRef}
+                    onDragOver={handleDragOver}
+                    onDrop={handleDrop}
+                    onClick={() => fileInputRef.current?.click()}
+                    className="p-8 sm:p-10 border-2 border-dashed border-red-300 hover:border-red-600 bg-red-50/20 hover:bg-red-50/40 rounded-2xl text-center cursor-pointer transition-all group shadow-xs"
+                  >
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      multiple
+                      accept="image/*,video/*,audio/*"
+                      onChange={handleFilesSelected}
+                      className="hidden"
+                    />
+
+                    <div className="w-14 h-14 rounded-2xl bg-red-100 text-red-600 flex items-center justify-center mx-auto mb-3 group-hover:scale-110 transition-transform">
+                      <UploadCloud className="w-7 h-7" />
+                    </div>
+
+                    <h3 className="text-base font-bold text-slate-900 group-hover:text-red-700 transition-colors">
+                      Drop Photos or 4K Video Clips Here
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
+                      Tap or drag camera files from your SD card or phone. Supports JPEG, PNG, Sony/Canon RAW, MP4, and MOV files.
+                    </p>
+
+                    <div className="mt-4 flex items-center justify-center gap-2">
+                      <span className="px-4 py-2 rounded-xl text-xs font-bold bg-red-600 group-hover:bg-red-700 text-white shadow-xs transition-colors">
+                        Choose Files from Device
+                      </span>
                     </div>
                   </div>
 
-                  {/* Progress bar */}
+                  {/* Summary / Success Message */}
+                  {uploadSummaryMessage && (
+                    <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-800 font-semibold flex items-center justify-between gap-3 shadow-2xs">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span>{uploadSummaryMessage}</span>
+                      </div>
+                      {destinationFolderInfo?.driveFolderUrl && (
+                        <a
+                          href={destinationFolderInfo.driveFolderUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-[11px] font-bold text-emerald-900 underline shrink-0 hover:text-emerald-700"
+                        >
+                          View in Google Drive ↗
+                        </a>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Queued Files Worklist */}
+                  {uploadFiles.length > 0 && (
+                    <div className="p-5 rounded-2xl bg-white border border-slate-200/80 shadow-xs space-y-4">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h4 className="text-sm font-bold text-slate-900">
+                              Selected Files ({uploadFiles.length})
+                            </h4>
+                            {totalSavedBytes > 0 && (
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                Saved {totalSavedMB} MB with Turbo ⚡
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-slate-500 mt-0.5">
+                            Total payload: <strong className="text-slate-800">{formatFileSize(totalUploadBytes)}</strong> {totalSavedBytes > 0 ? `(reduced from ${formatFileSize(totalOriginalBytes)})` : ''}
+                          </p>
+                        </div>
+
+                        <div className="flex items-center gap-2 self-start sm:self-auto">
+                          <button
+                            onClick={() => setUploadFiles([])}
+                            disabled={isUploading}
+                            className="px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-600 hover:text-red-600 hover:bg-slate-100 disabled:opacity-50 transition-colors"
+                          >
+                            Clear
+                          </button>
+
+                          <button
+                            onClick={handleStartUpload}
+                            disabled={isUploading || pendingCount === 0}
+                            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white shadow-xs transition-colors"
+                          >
+                            {isUploading ? (
+                              <>
+                                <RefreshCw className="w-4 h-4 animate-spin" />
+                                <span>Uploading 2 at a time...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Zap className="w-4 h-4 fill-current" />
+                                <span>Upload All ({pendingCount} Files)</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* File Items Grid */}
+                      <div className="space-y-2.5 max-h-96 overflow-y-auto pr-1">
+                        {uploadFiles.map(item => (
+                          <div
+                            key={item.id}
+                            className={`p-3 rounded-xl border flex flex-col gap-2 transition-all ${
+                              item.status === 'COMPLETED'
+                                ? 'bg-emerald-50/50 border-emerald-200'
+                                : item.status === 'UPLOADING'
+                                ? 'bg-red-50/40 border-red-200 shadow-2xs'
+                                : 'bg-white border-slate-200/90'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="flex items-center gap-3 min-w-0">
+                                {item.previewUrl ? (
+                                  <img
+                                    src={item.previewUrl}
+                                    alt={item.file.name}
+                                    className="w-10 h-10 rounded-lg object-cover border border-slate-200 shrink-0"
+                                  />
+                                ) : (
+                                  <div className="w-10 h-10 rounded-lg bg-slate-100 flex items-center justify-center text-slate-400 shrink-0">
+                                    {item.mediaType.includes('VIDEO') ? <Film className="w-5 h-5 text-red-500" /> : <Camera className="w-5 h-5" />}
+                                  </div>
+                                )}
+
+                                <div className="min-w-0">
+                                  <p className="text-xs font-bold text-slate-900 truncate max-w-xs sm:max-w-md">
+                                    {item.file.name}
+                                  </p>
+                                  <div className="flex items-center gap-2 text-[11px] text-slate-500 mt-0.5">
+                                    <span>{formatFileSize(item.file.size)}</span>
+                                    {item.isOptimized && (
+                                      <span className="font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200 text-[10px]">
+                                        -{item.reductionPercent}% optimized ⚡
+                                      </span>
+                                    )}
+                                    <span>• {item.mediaType}</span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-2 shrink-0">
+                                {item.status === 'COMPLETED' ? (
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xs font-bold text-emerald-700 flex items-center gap-1">
+                                      <CheckCircle className="w-4 h-4 text-emerald-600" /> Synced
+                                    </span>
+                                    {item.driveWebUrl && (
+                                      <a
+                                        href={item.driveWebUrl}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="text-[11px] font-bold text-red-600 hover:underline flex items-center gap-0.5"
+                                      >
+                                        <span>Drive</span>
+                                        <ExternalLink className="w-3 h-3" />
+                                      </a>
+                                    )}
+                                  </div>
+                                ) : item.status === 'UPLOADING' ? (
+                                  <div className="flex items-center gap-1.5 text-xs font-bold text-red-600">
+                                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                    <span>{item.progress}%</span>
+                                  </div>
+                                ) : item.status === 'FAILED' ? (
+                                  <span className="text-xs font-bold text-red-600 flex items-center gap-1" title={item.error}>
+                                    <AlertCircle className="w-4 h-4" /> Failed
+                                  </span>
+                                ) : item.status === 'OPTIMIZING' ? (
+                                  <span className="text-[11px] font-semibold text-amber-700 flex items-center gap-1">
+                                    <Sparkles className="w-3.5 h-3.5 animate-pulse" /> Compressing...
+                                  </span>
+                                ) : (
+                                  <button
+                                    onClick={() => handleRemoveQueuedFile(item.id)}
+                                    disabled={isUploading}
+                                    className="text-slate-400 hover:text-red-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Live Progress Bar */}
+                            {item.status === 'UPLOADING' && (
+                              <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                                <div
+                                  className="bg-red-600 h-1.5 rounded-full transition-all duration-150"
+                                  style={{ width: `${item.progress}%` }}
+                                />
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* TAB 2: SHOT CHECKLIST */}
+              {activeTab === 'checklist' && (
+                <div className="p-6 rounded-2xl bg-white border border-slate-200/80 shadow-xs space-y-4">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-900">
+                        Operational Shot Checklist ({completedShotsCount}/{totalShotsCount})
+                      </h3>
+                      <p className="text-xs text-slate-500">
+                        Tap any shot item to mark it completed as you capture it on field.
+                      </p>
+                    </div>
+                    <span className="text-xs font-bold text-slate-900">{checklistProgressPercent}% Complete</span>
+                  </div>
+
+                  {/* Progress Bar */}
                   <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden border border-slate-200/60">
                     <div
                       className="bg-red-600 h-2 rounded-full transition-all duration-300"
@@ -601,27 +881,27 @@ export const FieldCrewPortalPage: React.FC = () => {
                   </div>
 
                   {selectedAssignment.checklist && selectedAssignment.checklist.length > 0 ? (
-                    <div className="space-y-2 pt-1">
+                    <div className="space-y-2 pt-2">
                       {selectedAssignment.checklist.map(item => (
                         <div
                           key={item.id}
                           onClick={() => handleToggleChecklist(item.id)}
-                          className={`p-3 rounded-xl border flex items-center gap-3 cursor-pointer transition-colors ${
+                          className={`p-3.5 rounded-xl border flex items-center gap-3 cursor-pointer transition-colors ${
                             item.is_completed
-                              ? 'bg-emerald-50/60 border-emerald-200 text-slate-700'
-                              : 'bg-white border-slate-200 hover:border-slate-300 text-slate-900'
+                              ? 'bg-emerald-50/70 border-emerald-200 text-slate-700'
+                              : 'bg-white border-slate-200/90 hover:border-slate-300 text-slate-900'
                           }`}
                         >
                           {item.is_completed ? (
                             <CheckSquare className="w-5 h-5 text-emerald-600 shrink-0" />
                           ) : (
-                            <Square className="w-5 h-5 text-slate-300 shrink-0 hover:text-slate-400" />
+                            <Square className="w-5 h-5 text-slate-300 shrink-0 hover:text-slate-500" />
                           )}
                           <span className={`text-xs font-semibold ${item.is_completed ? 'line-through text-slate-400' : ''}`}>
                             {item.shot_title}
                           </span>
                           {item.is_required && (
-                            <span className="ml-auto text-[10px] font-bold uppercase tracking-wider text-red-600 bg-red-50 px-1.5 py-0.5 rounded border border-red-200">
+                            <span className="ml-auto text-[10px] font-bold uppercase tracking-wider text-red-600 bg-red-50 px-2 py-0.5 rounded border border-red-200">
                               Mandatory
                             </span>
                           )}
@@ -629,407 +909,96 @@ export const FieldCrewPortalPage: React.FC = () => {
                       ))}
                     </div>
                   ) : (
-                    <div className="p-4 text-center rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-500">
+                    <div className="p-6 text-center rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-500">
                       No specific shot items recorded for this assignment.
                     </div>
                   )}
                 </div>
-              </div>
+              )}
 
-              {/* Uploaded Media Gallery for this Assignment */}
-              <div className="p-6 rounded-2xl bg-white border border-slate-200/80 shadow-card space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="text-sm font-bold text-slate-900">
-                      Uploaded Footage & Photos ({assignedMedia.length})
-                    </h3>
-                    <p className="text-xs text-slate-500">
-                      Files recorded and backed up to Google Drive for this assignment.
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => setShowUploadModal(true)}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-red-600 bg-red-50 hover:bg-red-100 transition-colors"
-                  >
-                    <UploadCloud className="w-3.5 h-3.5" />
-                    <span>Upload More</span>
-                  </button>
-                </div>
+              {/* TAB 3: UPLOADED MEDIA FEED */}
+              {activeTab === 'media' && (
+                <div className="p-6 rounded-2xl bg-white border border-slate-200/80 shadow-xs space-y-4">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-900">
+                        Backed Up Media for this Task ({assignedMedia.length})
+                      </h3>
+                      <p className="text-xs text-slate-500">
+                        Files safely backed up into Google Drive.
+                      </p>
+                    </div>
 
-                {assignedMedia.length === 0 ? (
-                  <div className="p-8 text-center rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-500">
-                    No media uploaded yet for this assignment. Press "Upload Files" above to send photos directly to Google Drive.
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                    {assignedMedia.map(m => (
-                      <div
-                        key={m.id}
-                        className="rounded-xl border border-slate-200 overflow-hidden bg-white hover:border-slate-300 transition-shadow group flex flex-col"
+                    {destinationFolderInfo?.driveFolderUrl && (
+                      <a
+                        href={destinationFolderInfo.driveFolderUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1.5 text-xs font-bold text-red-600 hover:underline"
                       >
-                        <div className="aspect-video bg-slate-100 relative overflow-hidden flex items-center justify-center">
-                          {m.drive_thumbnail_url ? (
-                            <img
-                              src={m.drive_thumbnail_url}
-                              alt={m.filename}
-                              className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                            />
-                          ) : (
-                            <div className="text-slate-400">
-                              {m.media_type.includes('VIDEO') ? <Film className="w-6 h-6" /> : <Camera className="w-6 h-6" />}
-                            </div>
-                          )}
-                          <span className="absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded text-[9px] font-bold bg-slate-900/80 text-white backdrop-blur-xs">
-                            {m.media_type}
-                          </span>
-                        </div>
-                        <div className="p-2.5 flex-1 flex flex-col justify-between">
-                          <div>
-                            <p className="text-xs font-bold text-slate-900 truncate" title={m.filename}>
+                        <span>Open Drive Folder</span>
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </a>
+                    )}
+                  </div>
+
+                  {assignedMedia.length === 0 ? (
+                    <div className="p-8 text-center rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-500">
+                      No media uploaded yet for this assignment. Use the Fast Upload tab to stream footage!
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                      {assignedMedia.map(m => (
+                        <div
+                          key={m.id}
+                          className="group relative rounded-xl border border-slate-200/90 overflow-hidden bg-white shadow-2xs hover:shadow-xs transition-all"
+                        >
+                          <div className="aspect-square bg-slate-100 overflow-hidden flex items-center justify-center">
+                            {m.media_type.includes('VIDEO') ? (
+                              <div className="flex flex-col items-center justify-center gap-1 text-slate-400">
+                                <Film className="w-8 h-8 text-red-500" />
+                                <span className="text-[10px] font-bold uppercase">4K Video</span>
+                              </div>
+                            ) : (
+                              <img
+                                src={m.drive_thumbnail_url || 'https://images.unsplash.com/photo-1542038784456-1ea8e935640e?w=300'}
+                                alt={m.filename}
+                                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                              />
+                            )}
+                          </div>
+
+                          <div className="p-2.5 space-y-1">
+                            <p className="text-[11px] font-bold text-slate-900 truncate" title={m.filename}>
                               {m.filename}
                             </p>
-                            <p className="text-[10px] text-slate-500 mt-0.5">
-                              {formatFileSize(m.file_size_bytes || 0)} • {m.uploader_name}
+                            <p className="text-[10px] text-slate-500 truncate">
+                              {formatFileSize(m.file_size_bytes)} • By {m.uploader_name}
                             </p>
-                          </div>
-                          <div className="pt-2 mt-2 border-t border-slate-100 flex items-center justify-between">
                             <a
                               href={m.drive_web_url}
                               target="_blank"
                               rel="noreferrer"
-                              className="text-[11px] font-semibold text-red-600 hover:text-red-700 flex items-center gap-1 hover:underline"
+                              className="text-[10px] font-bold text-red-600 hover:underline inline-flex items-center gap-1 pt-1"
                             >
-                              <span>Open in Drive</span>
-                              <ExternalLink className="w-3 h-3" />
+                              <span>View in Drive</span>
+                              <ExternalLink className="w-2.5 h-2.5" />
                             </a>
-                            <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
                           </div>
                         </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </>
           ) : (
-            <div className="p-12 text-center rounded-2xl bg-white border border-slate-200 text-xs text-slate-500">
-              Select an assignment on the left to view required shots and upload media.
+            <div className="p-12 text-center rounded-2xl bg-white border border-slate-200 text-slate-400 text-xs">
+              Select an assignment on the left to start uploading and viewing checklists.
             </div>
           )}
         </div>
       </div>
-
-      {/* Upload Media to Google Drive Modal */}
-      <Modal
-        isOpen={showUploadModal}
-        onClose={() => {
-          if (!isUploading) {
-            setShowUploadModal(false);
-            setUploadFiles([]);
-          }
-        }}
-        title={`Upload to ${destinationFolderInfo?.folderName || 'Google Drive'}`}
-        maxWidth="2xl"
-        footer={
-          <div className="flex items-center justify-between w-full">
-            <span className="text-xs text-slate-500 font-semibold truncate mr-2">
-              {uploadFiles.length > 0 ? `${uploadFiles.length} file(s) selected` : 'No files selected'}
-            </span>
-            <div className="flex items-center gap-2 shrink-0">
-              <button
-                type="button"
-                onClick={() => {
-                  setShowUploadModal(false);
-                  setUploadFiles([]);
-                }}
-                disabled={isUploading}
-                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-200/60 transition-colors disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleStartUpload}
-                disabled={isUploading || uploadFiles.length === 0}
-                className="px-5 py-2.5 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white shadow-xs transition-colors flex items-center gap-1.5"
-              >
-                {isUploading ? (
-                  <>
-                    <RefreshCw className="w-4 h-4 animate-spin" />
-                    <span>Uploading...</span>
-                  </>
-                ) : (
-                  <>
-                    <UploadCloud className="w-4 h-4" />
-                    <span>Start Upload ({uploadFiles.length})</span>
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        }
-      >
-        <div className="space-y-5">
-          {/* Assignment Selector inside Modal */}
-          <div className="space-y-1.5">
-            <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
-              Target Assignment / Event Task
-            </label>
-            <select
-              value={selectedAssignment?.id || ''}
-              onChange={e => {
-                const found = myAssignments.find(a => a.id === e.target.value);
-                if (found) selectAssignment(found.id);
-              }}
-              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-xs font-semibold text-slate-900 focus:outline-none focus:border-red-500"
-            >
-              <option value="" disabled>Select assignment for these files...</option>
-              {myAssignments.map(a => (
-                <option key={a.id} value={a.id}>
-                  {a.title} ({a.day_session} • {a.coverage_type})
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Destination Google Drive Folder Selector */}
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between text-xs font-bold text-slate-700 uppercase tracking-wider">
-              <span className="flex items-center gap-1.5">
-                <FolderOpen className="w-3.5 h-3.5 text-red-600" />
-                <span>Destination Folder in Google Drive</span>
-              </span>
-              <div className="flex items-center gap-2">
-                {selectedFolderId && (
-                  <a
-                    href={`https://drive.google.com/drive/folders/${selectedFolderId}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-[11px] font-semibold text-red-600 hover:underline flex items-center gap-0.5 normal-case"
-                  >
-                    <span>Open Folder</span>
-                    <ExternalLink className="w-3 h-3" />
-                  </a>
-                )}
-                <a
-                  href="/drive"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-[11px] font-semibold text-slate-500 hover:text-slate-800 hover:underline flex items-center gap-0.5 normal-case"
-                >
-                  <span>Build Structure ↗</span>
-                </a>
-              </div>
-            </div>
-
-            {driveFolders.length > 0 ? (
-              <select
-                value={selectedFolderPath || (destinationFolderInfo ? destinationFolderInfo.fullPath : '')}
-                onChange={e => {
-                  const chosen = driveFolders.find(f => f.path === e.target.value);
-                  setSelectedFolderPath(e.target.value);
-                  if (chosen && chosen.driveFolderId) {
-                    setSelectedFolderId(chosen.driveFolderId);
-                  }
-                }}
-                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-xs font-semibold text-slate-900 focus:outline-none focus:border-red-500"
-              >
-                {driveFolders.map(item => (
-                  <option key={item.path} value={item.path}>
-                    {'\u00A0'.repeat(item.level * 3)}📁 {item.name} {item.driveFolderId ? '✓' : ''}
-                  </option>
-                ))}
-              </select>
-            ) : destinationFolderInfo ? (
-              <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs flex items-center justify-between">
-                <div className="flex items-center gap-2 text-slate-700">
-                  <FolderOpen className="w-4 h-4 text-amber-500 shrink-0" />
-                  <span className="font-medium">Target Drive Folder:</span>
-                  <span className="font-mono font-bold text-slate-900">{destinationFolderInfo.fullPath}</span>
-                </div>
-                <span className="text-[10px] uppercase font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                  Direct Cloud Sync
-                </span>
-              </div>
-            ) : null}
-            <p className="text-[10px] text-slate-500 font-mono truncate">
-              {selectedFolderPath ? `Target Path: ${selectedFolderPath}` : ''}
-            </p>
-          </div>
-
-          {/* Drive Authorization Warning if Not Connected */}
-          {driveStatus && !driveStatus.isConnected && (
-            <div className="p-4 rounded-xl bg-amber-50 border border-amber-300 text-xs text-amber-900 space-y-2">
-              <div className="flex items-center gap-2 font-bold text-amber-950">
-                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
-                <span>Google Drive Authorization Required</span>
-              </div>
-              <p className="text-[11px] text-amber-800 leading-relaxed">
-                Photos and footage are streamed directly into the official SAVISKAR 2026 Google Drive root folder (<strong>DSA MEDIAVERSE SAVISKAR 26</strong>). To enable direct upload, please authorize Google Drive.
-              </p>
-              {driveStatus.authUrl && (
-                <a
-                  href={driveStatus.authUrl}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white font-bold text-xs shadow-xs transition-colors"
-                >
-                  <UploadCloud className="w-3.5 h-3.5" />
-                  <span>Authorize Google Drive Now &rarr;</span>
-                </a>
-              )}
-            </div>
-          )}
-
-          {uploadSummaryMessage && (
-            <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-800 font-semibold flex items-center justify-between gap-2 shadow-2xs">
-              <div className="flex items-center gap-2">
-                <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span>{uploadSummaryMessage}</span>
-              </div>
-              {selectedFolderId && (
-                <a
-                  href={`https://drive.google.com/drive/folders/${selectedFolderId}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-900 underline shrink-0 hover:text-emerald-700"
-                >
-                  <span>Open Folder in Drive</span>
-                  <ExternalLink className="w-3 h-3" />
-                </a>
-              )}
-            </div>
-          )}
-
-          {/* Drag & Drop File Picker Zone */}
-          <div
-            onClick={() => fileInputRef.current?.click()}
-            className="p-8 border-2 border-dashed border-slate-300 hover:border-red-500 rounded-2xl text-center cursor-pointer transition-colors bg-slate-50/50 hover:bg-red-50/20 group"
-          >
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              accept="image/*,video/*,audio/*"
-              onChange={handleFilesSelected}
-              className="hidden"
-            />
-            <UploadCloud className="w-10 h-10 text-slate-400 group-hover:text-red-600 mx-auto mb-2 transition-colors" />
-            <h4 className="text-sm font-bold text-slate-900 group-hover:text-red-700">
-              Select Photos or 4K Video Files
-            </h4>
-            <p className="text-xs text-slate-500 mt-1">
-              Supports JPEG, PNG, RAW, MP4, MOV, and high-bitrate camera files.
-            </p>
-            <span className="inline-block mt-3 px-3 py-1 rounded-lg text-xs font-semibold bg-white border border-slate-200 text-slate-700 shadow-2xs">
-              Browse Files
-            </span>
-          </div>
-
-          {/* Queued Files List */}
-          {uploadFiles.length > 0 && (
-            <div className="space-y-3">
-              <div className="flex items-center justify-between text-xs font-bold text-slate-700">
-                <span>Selected Files ({uploadFiles.length})</span>
-                <button
-                  onClick={() => setUploadFiles([])}
-                  disabled={isUploading}
-                  className="text-red-600 hover:underline disabled:opacity-50"
-                >
-                  Clear all
-                </button>
-              </div>
-
-              <div className="max-h-60 overflow-y-auto space-y-2 pr-1">
-                {uploadFiles.map(item => (
-                  <div
-                    key={item.id}
-                    className="p-3 rounded-xl border border-slate-200 bg-white flex flex-col gap-2"
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        {item.previewUrl ? (
-                          <img
-                            src={item.previewUrl}
-                            alt={item.file.name}
-                            className="w-8 h-8 rounded object-cover border border-slate-200 shrink-0"
-                          />
-                        ) : (
-                          <div className="w-8 h-8 rounded bg-slate-100 flex items-center justify-center text-slate-400 shrink-0">
-                            {item.mediaType.includes('VIDEO') ? <Film className="w-4 h-4" /> : <Camera className="w-4 h-4" />}
-                          </div>
-                        )}
-                        <div className="min-w-0">
-                          <p className="text-xs font-bold text-slate-900 truncate">{item.file.name}</p>
-                          <p className="text-[10px] text-slate-500">
-                            {formatFileSize(item.file.size)} • {item.mediaType}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-2 shrink-0">
-                        {item.status === 'COMPLETED' ? (
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs font-bold text-emerald-600 flex items-center gap-1">
-                              <CheckCircle className="w-4 h-4" /> Uploaded
-                            </span>
-                            {item.driveWebUrl && (
-                              <a
-                                href={item.driveWebUrl}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="text-[11px] font-semibold text-red-600 hover:underline flex items-center gap-0.5"
-                              >
-                                <span>File</span>
-                                <ExternalLink className="w-3 h-3" />
-                              </a>
-                            )}
-                            {item.driveFolderUrl && (
-                              <a
-                                href={item.driveFolderUrl}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="text-[11px] font-semibold text-slate-600 hover:underline flex items-center gap-0.5"
-                              >
-                                <span>Folder</span>
-                                <ExternalLink className="w-3 h-3" />
-                              </a>
-                            )}
-                          </div>
-                        ) : item.status === 'FAILED' ? (
-                          <span className="text-xs font-bold text-red-600 flex items-center gap-1" title={item.error}>
-                            <AlertCircle className="w-4 h-4" /> Failed
-                          </span>
-                        ) : item.status === 'UPLOADING' ? (
-                          <span className="text-xs font-bold text-red-600 flex items-center gap-1">
-                            <RefreshCw className="w-3.5 h-3.5 animate-spin" /> {item.progress}%
-                          </span>
-                        ) : (
-                          <button
-                            onClick={() => handleRemoveQueuedFile(item.id)}
-                            disabled={isUploading}
-                            className="text-slate-400 hover:text-red-600 p-1 rounded"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Progress indicator */}
-                    {item.status === 'UPLOADING' && (
-                      <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
-                        <div
-                          className="bg-red-600 h-1.5 rounded-full transition-all duration-150"
-                          style={{ width: `${item.progress}%` }}
-                        />
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      </Modal>
     </div>
   );
 };

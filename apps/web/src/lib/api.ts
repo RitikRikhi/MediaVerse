@@ -176,7 +176,7 @@ class ApiClient {
 
   async uploadMediaFile(
     formData: FormData,
-    onProgress?: (percentage: number) => void
+    onProgress?: (percentage: number, loaded?: number, total?: number) => void
   ): Promise<{ asset: MediaAsset; destination: any; message: string }> {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
@@ -191,7 +191,7 @@ class ApiClient {
         xhr.upload.onprogress = (e) => {
           if (e.lengthComputable) {
             const percent = Math.round((e.loaded / e.total) * 100);
-            onProgress(percent);
+            onProgress(percent, e.loaded, e.total);
           }
         };
       }

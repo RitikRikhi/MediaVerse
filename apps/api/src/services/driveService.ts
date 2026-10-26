@@ -1183,6 +1183,68 @@ export class DriveService {
       description: `Uploaded via DSA MediaVerse for SAVISKAR 2026 -> ${finalFolderPath}`
     };
 
+    // For large files (> 4MB, like raw video or big camera RAW files), use Google Resumable Upload
+    // This provides dedicated chunking and prevents memory exhaustion on container instances
+    if (options.sizeBytes > 4 * 1024 * 1024) {
+      console.log(`[DriveService] Using Google Resumable Streaming pipeline for large file (${Math.round(options.sizeBytes / (1024 * 1024))} MB)...`);
+      const initRes = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json; charset=UTF-8',
+          'X-Upload-Content-Type': mimeType,
+          'X-Upload-Content-Length': String(options.sizeBytes)
+        },
+        body: JSON.stringify(metadata)
+      });
+
+      if (!initRes.ok) {
+        const errText = await initRes.text();
+        console.error(`[DriveService] Google Resumable Upload init failed: ${errText}`);
+        throw new Error(`Google Resumable Upload init failed: ${errText}`);
+      }
+
+      const location = initRes.headers.get('location');
+      if (!location) {
+        throw new Error('Google did not return upload session location');
+      }
+
+      const fileBuffer = await fs.promises.readFile(filePath);
+      const uploadRes = await fetch(location, {
+        method: 'PUT',
+        headers: {
+          'Content-Length': String(options.sizeBytes),
+          'Content-Type': mimeType
+        },
+        body: fileBuffer
+      });
+
+      // Clean up temporary local disk file after upload attempt
+      try {
+        if (fs.existsSync(filePath)) {
+          await fs.promises.unlink(filePath);
+        }
+      } catch {}
+
+      if (!uploadRes.ok) {
+        const errText = await uploadRes.text();
+        console.error(`[DriveService] Google Resumable Upload failed: ${errText}`);
+        throw new Error(`Google Resumable Upload failed (${uploadRes.status}): ${errText}`);
+      }
+
+      const data = (await uploadRes.json()) as any;
+      console.log(`[DriveService] Resumable upload successful! File ID: ${data.id}, Link: ${data.webViewLink}`);
+
+      return {
+        fileId: data.id,
+        webViewLink: data.webViewLink || `https://drive.google.com/file/d/${data.id}/view`,
+        thumbnailLink: data.thumbnailLink,
+        driveFolderId: destinationFolderId,
+        driveFolderUrl: `https://drive.google.com/drive/folders/${destinationFolderId}`,
+        folderPath: finalFolderPath
+      };
+    }
+
     const boundary = '-------314159265358979323846';
     const delimiter = `\r\n--${boundary}\r\n`;
     const closeDelimiter = `\r\n--${boundary}--`;
