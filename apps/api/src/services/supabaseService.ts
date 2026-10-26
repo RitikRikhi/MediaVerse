@@ -332,6 +332,18 @@ export class SupabaseService {
     }
   }
 
+  // Delete Assignment and all associated checklist items & members
+  static async deleteAssignment(id: string): Promise<void> {
+    if (!this.isAvailable()) return;
+    try {
+      await supabase!.from('shot_checklists').delete().eq('assignment_id', id);
+      await supabase!.from('assignment_members').delete().eq('assignment_id', id);
+      await supabase!.from('assignments').delete().eq('id', id);
+    } catch (err: any) {
+      console.warn('[SupabaseService] Failed to delete assignment from Cloud:', err.message);
+    }
+  }
+
   // Direct Cloud Query helpers for Verification & Extreme Testing
   static async queryCloudTable<T = any>(tableName: string, filter?: { column: string; value: any }): Promise<T[]> {
     if (!this.isAvailable()) return [];

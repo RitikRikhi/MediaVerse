@@ -517,8 +517,8 @@ describe('DSA MediaVerse AI — Extreme End-to-End Testing & Security Suite', ()
   // PHASE 16 — SECURITY & INJECTION TESTING
   // ==========================================================================
   describe('Phase 16: Security Vulnerability & Input Validation', () => {
-    it('16.1 should safely handle XSS script payload in inputs without executing', async () => {
-      const xssTitle = '<script>alert("XSS")</script> Test Event';
+    it('16.1 should safely handle XSS script payload in inputs without executing and support clean deletion', async () => {
+      const xssTitle = `<script>alert("XSS")</script> ${TEST_RUN_ID} Injection Test Event`;
       const res = await apiCall('/assignments', {
         method: 'POST',
         userId: PROFILES.COORDINATOR,
@@ -536,7 +536,17 @@ describe('DSA MediaVerse AI — Extreme End-to-End Testing & Security Suite', ()
 
       expect(res.status).toBe(201);
       // Clean text stored without execution
-      expect(res.data.data.title).toContain('Test Event');
+      expect(res.data.data.title).toContain(TEST_RUN_ID);
+
+      // Verify deletion works cleanly
+      if (res.data?.data?.id) {
+        const delRes = await apiCall(`/assignments/${res.data.data.id}`, {
+          method: 'DELETE',
+          userId: PROFILES.COORDINATOR
+        });
+        expect(delRes.status).toBe(200);
+        expect(delRes.data.success).toBe(true);
+      }
     });
 
     it('16.2 [NEGATIVE] Malformed UUID parameters should be rejected gracefully', async () => {

@@ -317,3 +317,83 @@ assignmentsRouter.patch('/:id/checklist/:itemId', authMiddleware, async (req: Au
     data: item
   });
 });
+
+// Add custom checklist item to an assignment
+assignmentsRouter.post('/:id/checklist', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  const assignment = db.assignments.find(a => a.id === req.params.id);
+  if (!assignment) {
+    return res.status(404).json({
+      success: false,
+      error: { code: 'NOT_FOUND', message: 'Assignment not found' }
+    });
+  }
+
+  const { shot_title, description, is_required } = req.body;
+  if (!shot_title || typeof shot_title !== 'string') {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'BAD_REQUEST', message: 'shot_title is required' }
+    });
+  }
+
+  const existingCount = db.shotChecklists.filter(c => c.assignment_id === assignment.id).length;
+  const newItem = {
+    id: crypto.randomUUID(),
+    assignment_id: assignment.id,
+    shot_title: shot_title.trim(),
+    description: description || undefined,
+    is_required: Boolean(is_required),
+    is_completed: false,
+    sort_order: existingCount + 1
+  };
+
+  db.shotChecklists.push(newItem);
+  await SupabaseService.persistChecklistItem(newItem);
+
+  res.status(201).json({
+    success: true,
+    data: newItem
+  });
+});
+
+// Delete assignment and all child checklists and memberships
+assignmentsRouter.delete(
+  '/:id',
+  authMiddleware,
+  requireRoles('MEDIA_COORDINATOR', 'SUPER_ADMIN', 'PRESIDENT'),
+  async (req: AuthenticatedRequest, res: Response) => {
+    const assignmentIndex = db.assignments.findIndex(a => a.id === req.params.id);
+    if (assignmentIndex === -1) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'NOT_FOUND', message: 'Assignment not found' }
+      });
+    }
+
+    const assignment = db.assignments[assignmentIndex];
+
+    // Remove from in-memory arrays
+    db.assignments.splice(assignmentIndex, 1);
+    db.shotChecklists = db.shotChecklists.filter(c => c.assignment_id !== assignment.id);
+    db.assignmentMembers = db.assignmentMembers.filter(m => m.assignment_id !== assignment.id);
+
+    // Delete from Supabase Cloud
+    await SupabaseService.deleteAssignment(assignment.id);
+
+    // Audit log
+    AuditService.log({
+      actorId: req.user!.id,
+      actorName: req.user!.full_name,
+      actorRole: req.user!.roles[0],
+      action: 'DELETE_ASSIGNMENT',
+      entityType: 'ASSIGNMENT',
+      entityId: assignment.id,
+      details: { title: assignment.title }
+    });
+
+    res.json({
+      success: true,
+      message: `Assignment "${assignment.title}" deleted successfully`
+    });
+  }
+);

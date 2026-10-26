@@ -151,6 +151,19 @@ class ApiClient {
     });
   }
 
+  async addChecklistItem(assignmentId: string, payload: { shot_title: string; description?: string; is_required?: boolean }): Promise<ShotChecklistItem> {
+    return this.request<ShotChecklistItem>(`/assignments/${assignmentId}/checklist`, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async deleteAssignment(id: string): Promise<{ success: boolean; message: string }> {
+    return this.request<{ success: boolean; message: string }>(`/assignments/${id}`, {
+      method: 'DELETE'
+    });
+  }
+
   // Media
   async getMediaAssets(params?: {
     event_id?: string;
