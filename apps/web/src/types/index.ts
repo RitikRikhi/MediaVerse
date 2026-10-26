@@ -189,6 +189,15 @@ export interface CoordinatorMetrics {
   total_active_crew: number;
 }
 
+export interface FolderNode {
+  id?: string;
+  name: string;
+  path: string;
+  children?: FolderNode[];
+  driveFolderId?: string;
+  driveWebUrl?: string;
+}
+
 export interface PersonalSubfolder {
   id: string;
   name: string;
@@ -203,8 +212,11 @@ export interface PersonalDriveInfo {
   userId: string;
   userName: string;
   role: UserRole;
+  structureMode?: 'ROLE_SPECIFIC' | 'FULL_EVENT';
+  customEmail?: string;
   personalRootFolderId: string;
   personalRootFolderUrl: string;
   personalRootPath: string;
+  tree?: FolderNode;
   subfolders: PersonalSubfolder[];
 }

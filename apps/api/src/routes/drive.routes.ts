@@ -287,6 +287,99 @@ driveRouter.get('/my-drive', authMiddleware, async (req: AuthenticatedRequest, r
   }
 });
 
+// Get interactive master tree + personal tree in a unified payload
+driveRouter.get('/tree', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const masterTree = DriveService.getMasterFolderTree(req.user);
+    const personalDrive = await DriveService.getUserPersonalDrive(req.user!);
+    res.json({
+      success: true,
+      data: {
+        masterTree,
+        personalDrive
+      }
+    });
+  } catch (err: any) {
+    res.status(500).json({
+      success: false,
+      error: { code: 'DRIVE_TREE_FAILED', message: err.message || 'Failed to retrieve folder tree' }
+    });
+  }
+});
+
+// Add a subfolder to ANY folder in the tree (official categories or personal vaults)
+driveRouter.post('/folders/add-subfolder', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  const { folderName, parentId, parentPath } = req.body;
+  if (!folderName || !folderName.trim()) {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'INVALID_INPUT', message: 'folderName is required' }
+    });
+  }
+
+  try {
+    const result = await DriveService.addSubfolderToAnyNode({
+      user: req.user!,
+      folderName: folderName.trim(),
+      parentFolderId: parentId,
+      parentPath
+    });
+
+    AuditService.log({
+      actorId: req.user!.id,
+      actorName: req.user!.full_name,
+      actorRole: req.user!.roles[0],
+      action: 'ADD_SUBFOLDER',
+      entityType: 'FOLDER',
+      entityId: result.driveFolderId,
+      details: { folderName, parentId, path: result.path }
+    });
+
+    res.status(201).json({
+      success: true,
+      data: result
+    });
+  } catch (err: any) {
+    res.status(400).json({
+      success: false,
+      error: { code: 'ADD_SUBFOLDER_FAILED', message: err.message || 'Failed to add subfolder' }
+    });
+  }
+});
+
+// Configure personal drive: role-specific event list OR full festival directory
+driveRouter.post('/my-drive/setup', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  const { role, structureMode, customEmail } = req.body;
+
+  try {
+    const result = await DriveService.setupUserPersonalDrive(req.user!, {
+      role: role || req.user!.roles[0],
+      structureMode: structureMode || 'ROLE_SPECIFIC',
+      customEmail
+    });
+
+    AuditService.log({
+      actorId: req.user!.id,
+      actorName: req.user!.full_name,
+      actorRole: req.user!.roles[0],
+      action: 'SETUP_PERSONAL_DRIVE',
+      entityType: 'FOLDER',
+      entityId: result.personalRootFolderId,
+      details: { structureMode, role, subfolderCount: result.subfolders.length }
+    });
+
+    res.json({
+      success: true,
+      data: result
+    });
+  } catch (err: any) {
+    res.status(400).json({
+      success: false,
+      error: { code: 'SETUP_PERSONAL_DRIVE_FAILED', message: err.message || 'Failed to setup personal drive' }
+    });
+  }
+});
+
 // Add a custom subfolder inside user's personal drive
 driveRouter.post('/my-drive/folders', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   const { folderName, parentFolderId } = req.body;

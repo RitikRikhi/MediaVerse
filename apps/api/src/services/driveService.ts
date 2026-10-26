@@ -689,6 +689,61 @@ export class DriveService {
     return this.flattenHierarchy(root);
   }
 
+  // Unified Interactive Master Folder Tree with SAVISKAR 2026 categories and Personal Crew Vaults
+  static getMasterFolderTree(currentUser?: { id: string; full_name: string }): FolderNode {
+    const root = JSON.parse(JSON.stringify(this.getFolderStructure())) as FolderNode;
+
+    if (!root.children) root.children = [];
+    let crewNode = root.children.find(c => c.name === 'Crew Personal Drives');
+    if (!crewNode) {
+      crewNode = {
+        name: 'Crew Personal Drives',
+        path: `${root.path}/Crew Personal Drives`,
+        children: []
+      };
+      root.children.push(crewNode);
+    }
+    crewNode.children = crewNode.children || [];
+
+    // Populate user personal folders from db.mediaFolders
+    const personalRoots = db.mediaFolders.filter(
+      f => f.is_personal && (!f.parent_folder_id || f.parent_folder_id === '')
+    );
+
+    for (const pr of personalRoots) {
+      let existingUserNode = crewNode.children.find(c => c.name === pr.folder_name);
+      if (!existingUserNode) {
+        existingUserNode = {
+          id: pr.id,
+          name: pr.folder_name,
+          path: pr.folder_path,
+          driveFolderId: pr.drive_folder_id,
+          driveWebUrl: pr.drive_web_url,
+          children: []
+        };
+        crewNode.children.push(existingUserNode);
+      }
+      existingUserNode.children = existingUserNode.children || [];
+
+      // Populate subfolders
+      const subs = db.mediaFolders.filter(f => f.is_personal && f.parent_folder_id === pr.id);
+      for (const s of subs) {
+        if (!existingUserNode.children.some(c => c.name === s.folder_name)) {
+          existingUserNode.children.push({
+            id: s.id,
+            name: s.folder_name,
+            path: s.folder_path,
+            driveFolderId: s.drive_folder_id,
+            driveWebUrl: s.drive_web_url,
+            children: []
+          });
+        }
+      }
+    }
+
+    return root;
+  }
+
   static nodeMatches(node: FolderNode, target: string): boolean {
     if (node.path.toLowerCase() === target.toLowerCase()) return true;
     if (node.name.toLowerCase() === target.toLowerCase()) return true;
@@ -703,6 +758,17 @@ export class DriveService {
     if (root.children) {
       for (const child of root.children) {
         const found = this.findNodeByPath(child, targetPath);
+        if (found) return found;
+      }
+    }
+    return null;
+  }
+
+  static findNodeByDriveId(root: FolderNode, driveId: string): FolderNode | null {
+    if (root.driveFolderId && root.driveFolderId === driveId) return root;
+    if (root.children) {
+      for (const child of root.children) {
+        const found = this.findNodeByDriveId(child, driveId);
         if (found) return found;
       }
     }
@@ -783,6 +849,118 @@ export class DriveService {
       structure: root,
       flatList: this.flattenHierarchy(root),
       newFolder: newNode
+    };
+  }
+
+  // Add a subfolder to ANY node in the tree (official categories or personal vaults)
+  static async addSubfolderToAnyNode(options: {
+    user: { id: string; full_name: string; roles: UserRole[] };
+    folderName: string;
+    parentFolderId?: string;
+    parentPath?: string;
+  }): Promise<{
+    id: string;
+    name: string;
+    path: string;
+    driveFolderId: string;
+    driveWebUrl: string;
+  }> {
+    const cleanName = options.folderName.trim();
+    if (!cleanName) throw new Error('Subfolder name cannot be empty.');
+
+    const token = await this.getValidAccessToken();
+    const root = this.getFolderStructure();
+
+    // 1. Resolve parent Drive ID and parent path
+    let parentDriveId = (options.parentFolderId || '').trim();
+    let parentPath = (options.parentPath || '').trim();
+
+    if (parentDriveId && !parentPath) {
+      const dbMatch = db.mediaFolders.find(f => f.drive_folder_id === parentDriveId);
+      if (dbMatch) {
+        parentPath = dbMatch.folder_path;
+      } else {
+        const nodeMatch = this.findNodeByDriveId(root, parentDriveId);
+        if (nodeMatch) {
+          parentPath = nodeMatch.path;
+        }
+      }
+    }
+
+    if (parentPath && !parentDriveId) {
+      const node = this.findNodeByPath(root, parentPath);
+      if (node && node.driveFolderId) {
+        parentDriveId = node.driveFolderId;
+      }
+    }
+
+    if (!parentDriveId) {
+      parentDriveId = config.google.rootFolderId || '1PNvblS0BffXR12av3dC7fP7wNdf948kO';
+      parentPath = parentPath || '/DSA MEDIAVERSE SAVISKAR 26';
+    }
+
+    // 2. Create in Google Drive
+    let createdDriveId = '';
+    if (token && !parentDriveId.startsWith('user-drive-') && !parentDriveId.startsWith('sub-')) {
+      try {
+        createdDriveId = await this.getOrCreateDriveFolder(cleanName, parentDriveId);
+      } catch (err: any) {
+        console.warn(`[DriveService] Drive subfolder creation notice: ${err.message}`);
+        createdDriveId = `sub-${crypto.randomUUID().slice(0, 8)}`;
+      }
+    } else {
+      createdDriveId = `sub-${crypto.randomUUID().slice(0, 8)}`;
+    }
+
+    const newPath = `${parentPath}/${cleanName}`;
+    const newDriveUrl = `https://drive.google.com/drive/folders/${createdDriveId}`;
+
+    // 3. Update structure if parent exists in root structure
+    const parentNode = this.findNodeByPath(root, parentPath);
+    if (parentNode) {
+      parentNode.children = parentNode.children || [];
+      const newNode: FolderNode = {
+        id: crypto.randomUUID(),
+        name: cleanName,
+        path: newPath,
+        driveFolderId: createdDriveId,
+        driveWebUrl: newDriveUrl,
+        children: []
+      };
+      parentNode.children.push(newNode);
+      this.saveFolderStructureToDisk(root);
+    }
+
+    // 4. Record in db.mediaFolders and Supabase
+    const newRecord: MediaFolder = {
+      id: crypto.randomUUID(),
+      event_id: 'saviskar-2026',
+      folder_name: cleanName,
+      folder_path: newPath,
+      parent_folder_id: parentDriveId,
+      drive_folder_id: createdDriveId,
+      drive_web_url: newDriveUrl,
+      is_system_created: false,
+      user_id: options.user.id,
+      user_name: options.user.full_name,
+      role: options.user.roles[0],
+      is_personal: true,
+      created_at: new Date().toISOString()
+    };
+
+    db.mediaFolders.push(newRecord);
+    this.folderIdCache.set(newPath, createdDriveId);
+    this.folderIdCache.set(cleanName, createdDriveId);
+    await SupabaseService.persistMediaFolder(newRecord).catch(() => {});
+
+    console.log(`[DriveService] Successfully added subfolder "${cleanName}" under parent "${parentPath}" (Drive ID: ${createdDriveId})`);
+
+    return {
+      id: newRecord.id,
+      name: cleanName,
+      path: newPath,
+      driveFolderId: createdDriveId,
+      driveWebUrl: newDriveUrl
     };
   }
 
@@ -1490,22 +1668,42 @@ export class DriveService {
         f => f.user_id === user.id && f.is_personal && f.parent_folder_id === existingPersonalRoot.id
       );
 
+      const subList = existingSubs.map(s => ({
+        id: s.id,
+        name: s.folder_name,
+        path: s.folder_path,
+        driveFolderId: s.drive_folder_id,
+        driveWebUrl: s.drive_web_url,
+        isDefault: s.is_system_created,
+        created_at: s.created_at
+      }));
+
+      const personalTree: FolderNode = {
+        id: existingPersonalRoot.id,
+        name: existingPersonalRoot.folder_name,
+        path: existingPersonalRoot.folder_path,
+        driveFolderId: existingPersonalRoot.drive_folder_id,
+        driveWebUrl: existingPersonalRoot.drive_web_url,
+        children: subList.map(s => ({
+          id: s.id,
+          name: s.name,
+          path: s.path,
+          driveFolderId: s.driveFolderId,
+          driveWebUrl: s.driveWebUrl,
+          children: []
+        }))
+      };
+
       return {
         userId: user.id,
         userName: user.full_name,
         role,
+        structureMode: existingPersonalRoot.folder_name.includes('FULL EVENT') ? 'FULL_EVENT' : 'ROLE_SPECIFIC',
         personalRootFolderId: existingPersonalRoot.drive_folder_id,
         personalRootFolderUrl: existingPersonalRoot.drive_web_url,
         personalRootPath: existingPersonalRoot.folder_path,
-        subfolders: existingSubs.map(s => ({
-          id: s.id,
-          name: s.folder_name,
-          path: s.folder_path,
-          driveFolderId: s.drive_folder_id,
-          driveWebUrl: s.drive_web_url,
-          isDefault: s.is_system_created,
-          created_at: s.created_at
-        }))
+        tree: personalTree,
+        subfolders: subList
       };
     }
 
@@ -1601,21 +1799,194 @@ export class DriveService {
       });
     }
 
+    const personalTree: FolderNode = {
+      id: personalRootRecord.id,
+      name: personalRootRecord.folder_name,
+      path: personalRootRecord.folder_path,
+      driveFolderId: personalRootRecord.drive_folder_id,
+      driveWebUrl: personalRootRecord.drive_web_url,
+      children: subfolders.map(s => ({
+        id: s.id,
+        name: s.name,
+        path: s.path,
+        driveFolderId: s.driveFolderId,
+        driveWebUrl: s.driveWebUrl,
+        children: []
+      }))
+    };
+
     console.log(`[DriveService] Successfully provisioned personal drive for ${user.full_name} (${role}) with ${subfolders.length} subfolders.`);
 
     return {
       userId: user.id,
       userName: user.full_name,
       role,
+      structureMode: 'ROLE_SPECIFIC',
       personalRootFolderId: userDriveFolderId,
       personalRootFolderUrl: personalRootRecord.drive_web_url,
       personalRootPath,
+      tree: personalTree,
       subfolders
     };
   }
 
   static async getUserPersonalDrive(user: { id: string; full_name: string; email?: string; roles: UserRole[] }): Promise<PersonalDriveInfo> {
     return this.provisionPersonalUserDrive(user);
+  }
+
+  // User-driven custom setup: choose role-specific list OR full festival directory in their personal Drive
+  static async setupUserPersonalDrive(
+    user: { id: string; full_name: string; email?: string; roles: UserRole[] },
+    options: {
+      role: UserRole;
+      structureMode: 'ROLE_SPECIFIC' | 'FULL_EVENT';
+      customEmail?: string;
+    }
+  ): Promise<PersonalDriveInfo> {
+    const role = options.role || user.roles[0] || 'PHOTOGRAPHER';
+    const rootId = config.google.rootFolderId || '1PNvblS0BffXR12av3dC7fP7wNdf948kO';
+    const parentContainerName = 'Crew Personal Drives';
+
+    // 1. Ensure "Crew Personal Drives" parent folder exists in Google Drive
+    let crewDrivesParentId = this.folderIdCache.get(parentContainerName) || '';
+    if (!crewDrivesParentId) {
+      try {
+        crewDrivesParentId = await this.getOrCreateDriveFolder(parentContainerName, rootId);
+        this.folderIdCache.set(parentContainerName, crewDrivesParentId);
+      } catch {
+        crewDrivesParentId = rootId;
+      }
+    }
+
+    // 2. Clear old personal records for this user in db.mediaFolders to rebuild with chosen structure
+    db.mediaFolders = db.mediaFolders.filter(f => f.user_id !== user.id);
+
+    // 3. Choose naming and templates
+    const isFullEvent = options.structureMode === 'FULL_EVENT';
+    const userFolderName = isFullEvent
+      ? `${user.full_name} (FULL FESTIVAL DIRECTORY)`
+      : `${user.full_name} (${role})`;
+
+    let userDriveFolderId = '';
+    try {
+      userDriveFolderId = await this.getOrCreateDriveFolder(userFolderName, crewDrivesParentId);
+    } catch {
+      userDriveFolderId = `user-drive-${user.id.slice(0, 8)}`;
+    }
+
+    const personalRootPath = `/DSA MEDIAVERSE SAVISKAR 26/${parentContainerName}/${userFolderName}`;
+    const personalRootRecord: MediaFolder = {
+      id: crypto.randomUUID(),
+      event_id: 'saviskar-2026',
+      folder_name: userFolderName,
+      folder_path: personalRootPath,
+      drive_folder_id: userDriveFolderId,
+      drive_web_url: `https://drive.google.com/drive/folders/${userDriveFolderId}`,
+      is_system_created: false,
+      user_id: user.id,
+      user_name: user.full_name,
+      role,
+      is_personal: true,
+      created_at: new Date().toISOString()
+    };
+
+    db.mediaFolders.push(personalRootRecord);
+    this.folderIdCache.set(personalRootPath, userDriveFolderId);
+    this.folderIdCache.set(userFolderName, userDriveFolderId);
+    await SupabaseService.persistMediaFolder(personalRootRecord).catch(() => {});
+
+    // 4. Subfolders based on structure choice
+    const templates = isFullEvent
+      ? [
+          'Day 1 - Photography',
+          'Day 1 - Raw Videography',
+          'Day 1 - Editing & Deliverables',
+          'Day 2 - Photography',
+          'Day 2 - Raw Videography',
+          'Day 2 - Editing & Deliverables',
+          'Day 3 - Valedictory & Awards',
+          'Social Media Reels & Shorts (9-16)',
+          'Master Branding & Logos'
+        ]
+      : this.getPersonalDriveTemplates(role);
+
+    const subfolders: PersonalSubfolder[] = [];
+
+    for (const subName of templates) {
+      let subDriveId = '';
+      if (!userDriveFolderId.startsWith('user-drive-')) {
+        try {
+          subDriveId = await this.getOrCreateDriveFolder(subName, userDriveFolderId);
+        } catch {
+          subDriveId = `sub-${crypto.randomUUID().slice(0, 8)}`;
+        }
+      } else {
+        subDriveId = `sub-${crypto.randomUUID().slice(0, 8)}`;
+      }
+
+      const subPath = `${personalRootPath}/${subName}`;
+      const subRecord: MediaFolder = {
+        id: crypto.randomUUID(),
+        event_id: 'saviskar-2026',
+        folder_name: subName,
+        folder_path: subPath,
+        parent_folder_id: personalRootRecord.id,
+        drive_folder_id: subDriveId,
+        drive_web_url: `https://drive.google.com/drive/folders/${subDriveId}`,
+        is_system_created: true,
+        user_id: user.id,
+        user_name: user.full_name,
+        role,
+        is_personal: true,
+        created_at: new Date().toISOString()
+      };
+
+      db.mediaFolders.push(subRecord);
+      this.folderIdCache.set(subPath, subDriveId);
+      this.folderIdCache.set(subName, subDriveId);
+      await SupabaseService.persistMediaFolder(subRecord).catch(() => {});
+
+      subfolders.push({
+        id: subRecord.id,
+        name: subRecord.folder_name,
+        path: subRecord.folder_path,
+        driveFolderId: subRecord.drive_folder_id,
+        driveWebUrl: subRecord.drive_web_url,
+        isDefault: true,
+        created_at: subRecord.created_at
+      });
+    }
+
+    const personalTree: FolderNode = {
+      id: personalRootRecord.id,
+      name: personalRootRecord.folder_name,
+      path: personalRootRecord.folder_path,
+      driveFolderId: personalRootRecord.drive_folder_id,
+      driveWebUrl: personalRootRecord.drive_web_url,
+      children: subfolders.map(s => ({
+        id: s.id,
+        name: s.name,
+        path: s.path,
+        driveFolderId: s.driveFolderId,
+        driveWebUrl: s.driveWebUrl,
+        children: []
+      }))
+    };
+
+    console.log(`[DriveService] Reconfigured personal drive for ${user.full_name} (${role}) in mode ${options.structureMode} with ${subfolders.length} subfolders.`);
+
+    return {
+      userId: user.id,
+      userName: user.full_name,
+      role,
+      structureMode: options.structureMode,
+      customEmail: options.customEmail,
+      personalRootFolderId: userDriveFolderId,
+      personalRootFolderUrl: personalRootRecord.drive_web_url,
+      personalRootPath,
+      tree: personalTree,
+      subfolders
+    };
   }
 
   static async addUserPersonalSubfolder(

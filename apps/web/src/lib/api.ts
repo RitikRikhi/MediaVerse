@@ -11,7 +11,8 @@ import {
   CoordinatorMetrics,
   UserRole,
   PersonalDriveInfo,
-  PersonalSubfolder
+  PersonalSubfolder,
+  FolderNode
 } from '../types';
 
 const BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
@@ -384,6 +385,29 @@ class ApiClient {
   async disconnectDrive(): Promise<any> {
     return this.request<any>('/drive/disconnect', {
       method: 'POST'
+    });
+  }
+
+  // Unified Tree & Dynamic Subfolders
+  async getDriveTree(): Promise<{ masterTree: FolderNode; personalDrive: PersonalDriveInfo }> {
+    return this.request<{ masterTree: FolderNode; personalDrive: PersonalDriveInfo }>('/drive/tree');
+  }
+
+  async addSubfolder(payload: { parentId?: string; parentPath?: string; folderName: string }): Promise<any> {
+    return this.request<any>('/drive/folders/add-subfolder', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async setupPersonalDrive(payload: {
+    role: UserRole;
+    structureMode: 'ROLE_SPECIFIC' | 'FULL_EVENT';
+    customEmail?: string;
+  }): Promise<PersonalDriveInfo> {
+    return this.request<PersonalDriveInfo>('/drive/my-drive/setup', {
+      method: 'POST',
+      body: JSON.stringify(payload)
     });
   }
 
