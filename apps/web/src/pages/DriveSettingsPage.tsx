@@ -30,7 +30,7 @@ export const DriveSettingsPage: React.FC = () => {
   const [flatList, setFlatList] = useState<any[]>([]);
   const [provisionMessage, setProvisionMessage] = useState<string>('');
   const [isSyncing, setIsSyncing] = useState(false);
-  const [testUrl, setTestUrl] = useState('https://drive.google.com/drive/u/0/folders/1SdY0hIYAiYGL0DFzyeVjLOssg7sEdSP4');
+  const [testUrl, setTestUrl] = useState('https://drive.google.com/drive/folders/1PNvblS0BffXR12av3dC7fP7wNdf948kO');
   const [urlValidationResult, setUrlValidationResult] = useState<any>(null);
   const [copiedLink, setCopiedLink] = useState(false);
 
@@ -207,7 +207,7 @@ export const DriveSettingsPage: React.FC = () => {
   };
 
   const handleCopyRootLink = () => {
-    const rootUrl = driveStatus?.rootFolderUrl || 'https://drive.google.com/drive/u/0/folders/1SdY0hIYAiYGL0DFzyeVjLOssg7sEdSP4';
+    const rootUrl = driveStatus?.rootFolderUrl || 'https://drive.google.com/drive/folders/1PNvblS0BffXR12av3dC7fP7wNdf948kO';
     navigator.clipboard.writeText(rootUrl);
     setCopiedLink(true);
     setTimeout(() => setCopiedLink(false), 2000);
@@ -338,8 +338,8 @@ export const DriveSettingsPage: React.FC = () => {
     );
   };
 
-  const rootUrl = driveStatus?.rootFolderUrl || 'https://drive.google.com/drive/u/0/folders/1SdY0hIYAiYGL0DFzyeVjLOssg7sEdSP4';
-  const rootId = driveStatus?.rootFolderId || '1SdY0hIYAiYGL0DFzyeVjLOssg7sEdSP4';
+  const rootUrl = driveStatus?.rootFolderUrl || 'https://drive.google.com/drive/folders/1PNvblS0BffXR12av3dC7fP7wNdf948kO';
+  const rootId = driveStatus?.rootFolderId || '1PNvblS0BffXR12av3dC7fP7wNdf948kO';
   const isConnected = Boolean(driveStatus?.isConnected);
 
   return (

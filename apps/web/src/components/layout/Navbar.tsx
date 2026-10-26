@@ -104,7 +104,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
 
           {/* Drive Quick Link */}
           <a
-            href="https://drive.google.com/drive/u/0/folders/1SdY0hIYAiYGL0DFzyeVjLOssg7sEdSP4"
+            href="https://drive.google.com/drive/folders/1PNvblS0BffXR12av3dC7fP7wNdf948kO"
             target="_blank"
             rel="noreferrer"
             className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-red-50 hover:text-red-700 border border-slate-200 hover:border-red-200 transition-colors"

@@ -86,18 +86,28 @@ export class DriveService {
   static init(): void {
     this.loadTokensFromDisk();
 
+    const masterRefreshToken = config.google.refreshToken;
+
     // If no tokens on disk, auto-hydrate with configured master refresh token
-    if (!this.tokenState.refreshToken && config.google.refreshToken) {
+    if (!this.tokenState.refreshToken && masterRefreshToken) {
       this.tokenState = {
         ...this.tokenState,
-        refreshToken: config.google.refreshToken,
+        refreshToken: masterRefreshToken,
         userEmail: config.google.userEmail || 'rikhiritik8@gmail.com',
-        activeRootFolderId: config.google.rootFolderId,
-        activeRootFolderUrl: config.google.rootFolderUrl,
+        activeRootFolderId: config.google.rootFolderId || '1PNvblS0BffXR12av3dC7fP7wNdf948kO',
+        activeRootFolderUrl: config.google.rootFolderUrl || 'https://drive.google.com/drive/folders/1PNvblS0BffXR12av3dC7fP7wNdf948kO',
         connectedAt: new Date().toISOString()
       };
       console.log(`[DriveService] Initialized Google Drive with master refresh token for ${this.tokenState.userEmail}`);
-      this.refreshAccessToken().catch(err => {
+    }
+
+    // Proactively refresh access token if refresh token is present
+    if (this.tokenState.refreshToken && (!this.tokenState.accessToken || !this.tokenState.expiryDate || Date.now() > this.tokenState.expiryDate - 120000)) {
+      this.refreshAccessToken().then(tok => {
+        if (tok) {
+          console.log('[DriveService] Master Google Drive access token ready and active.');
+        }
+      }).catch(err => {
         console.warn('[DriveService] Initial master token refresh warning:', err.message);
       });
     }
@@ -171,7 +181,15 @@ export class DriveService {
     if (!this.tokenState.accessToken && !this.tokenState.refreshToken) {
       this.loadTokensFromDisk();
       if (!this.tokenState.accessToken && !this.tokenState.refreshToken) {
-        return null;
+        const masterRefreshToken = config.google.refreshToken;
+        if (masterRefreshToken) {
+          this.tokenState.refreshToken = masterRefreshToken;
+          this.tokenState.userEmail = config.google.userEmail || 'rikhiritik8@gmail.com';
+          this.tokenState.activeRootFolderId = config.google.rootFolderId || '1PNvblS0BffXR12av3dC7fP7wNdf948kO';
+          this.tokenState.activeRootFolderUrl = config.google.rootFolderUrl || 'https://drive.google.com/drive/folders/1PNvblS0BffXR12av3dC7fP7wNdf948kO';
+        } else {
+          return null;
+        }
       }
     }
 
@@ -193,7 +211,7 @@ export class DriveService {
     }
 
     const token = await this.getValidAccessToken();
-    const configuredId = config.google.rootFolderId || '1SdY0hIYAiYGL0DFzyeVjLOssg7sEdSP4';
+    const configuredId = config.google.rootFolderId || '1PNvblS0BffXR12av3dC7fP7wNdf948kO';
     const configuredUrl = config.google.rootFolderUrl || `https://drive.google.com/drive/folders/${configuredId}`;
 
     if (!token) {
@@ -276,8 +294,18 @@ export class DriveService {
   }
 
   static getStatus() {
+    if (!this.tokenState.refreshToken && !this.tokenState.accessToken) {
+      const masterRefreshToken = config.google.refreshToken;
+      if (masterRefreshToken) {
+        this.tokenState.refreshToken = masterRefreshToken;
+        this.tokenState.userEmail = config.google.userEmail || 'rikhiritik8@gmail.com';
+        this.tokenState.activeRootFolderId = config.google.rootFolderId || '1PNvblS0BffXR12av3dC7fP7wNdf948kO';
+        this.tokenState.activeRootFolderUrl = config.google.rootFolderUrl || 'https://drive.google.com/drive/folders/1PNvblS0BffXR12av3dC7fP7wNdf948kO';
+      }
+    }
+
     const hasToken = Boolean(this.tokenState.accessToken || this.tokenState.refreshToken);
-    const rootId = this.tokenState.activeRootFolderId || config.google.rootFolderId || '1SdY0hIYAiYGL0DFzyeVjLOssg7sEdSP4';
+    const rootId = this.tokenState.activeRootFolderId || config.google.rootFolderId || '1PNvblS0BffXR12av3dC7fP7wNdf948kO';
     const rootUrl = this.tokenState.activeRootFolderUrl || config.google.rootFolderUrl || `https://drive.google.com/drive/folders/${rootId}`;
 
     return {
@@ -289,8 +317,8 @@ export class DriveService {
       folderTitle: 'DSA MEDIAVERSE SAVISKAR 26',
       authUrl: this.getOAuthUrl(),
       isConnected: hasToken,
-      userEmail: this.tokenState.userEmail,
-      connectedAt: this.tokenState.connectedAt,
+      userEmail: this.tokenState.userEmail || 'rikhiritik8@gmail.com',
+      connectedAt: this.tokenState.connectedAt || new Date().toISOString(),
       mode: hasToken ? 'LIVE_GOOGLE_DRIVE_API' : 'AWAITING_GOOGLE_AUTH'
     };
   }
@@ -824,7 +852,7 @@ export class DriveService {
     }
 
     const fullPath = `DSA MediaVerse - SAVISKAR 2026/${day}/${category}`;
-    const rootUrl = config.google.rootFolderUrl || 'https://drive.google.com/drive/u/0/folders/1SdY0hIYAiYGL0DFzyeVjLOssg7sEdSP4';
+    const rootUrl = config.google.rootFolderUrl || 'https://drive.google.com/drive/folders/1PNvblS0BffXR12av3dC7fP7wNdf948kO';
     
     // Deterministic folder ID hash for consistent linking
     const folderHash = crypto.createHash('md5').update(fullPath).digest('hex').slice(0, 12);
@@ -959,7 +987,7 @@ export class DriveService {
     rootUrl?: string
   ): { success: boolean; createdFolders: MediaFolder[]; message: string } {
     const createdFolders: MediaFolder[] = [];
-    const baseRootUrl = rootUrl || config.google.rootFolderUrl || 'https://drive.google.com/drive/u/0/folders/1SdY0hIYAiYGL0DFzyeVjLOssg7sEdSP4';
+    const baseRootUrl = rootUrl || config.google.rootFolderUrl || 'https://drive.google.com/drive/folders/1PNvblS0BffXR12av3dC7fP7wNdf948kO';
 
     const days = ['Day 1', 'Day 2'] as const;
     const categories = [

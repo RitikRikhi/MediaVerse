@@ -169,7 +169,7 @@ export const DashboardPage: React.FC = () => {
       {/* Live Services Strip: Google Drive Root & Gemini AI Guard */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <a
-          href="https://drive.google.com/drive/u/0/folders/1SdY0hIYAiYGL0DFzyeVjLOssg7sEdSP4"
+          href="https://drive.google.com/drive/folders/1PNvblS0BffXR12av3dC7fP7wNdf948kO"
           target="_blank"
           rel="noopener noreferrer"
           className="p-4 rounded-2xl bg-white border border-slate-200/80 hover:border-slate-300 shadow-xs flex items-center justify-between group transition-all"
@@ -187,7 +187,7 @@ export const DashboardPage: React.FC = () => {
                   Drive Connected
                 </span>
               </div>
-              <p className="text-[11px] text-slate-500 font-mono">1SdY0hIYAiYGL0DFzyeVjLOssg7sEdSP4</p>
+              <p className="text-[11px] text-slate-500 font-mono">1PNvblS0BffXR12av3dC7fP7wNdf948kO</p>
             </div>
           </div>
           <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-red-600 group-hover:translate-x-0.5 transition-all" />
