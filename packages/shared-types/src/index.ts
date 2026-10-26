@@ -225,6 +225,7 @@ export interface PersonalDriveInfo {
   role: UserRole;
   structureMode?: 'ROLE_SPECIFIC' | 'FULL_EVENT';
   customEmail?: string;
+  sharedWithEmail?: string;
   personalRootFolderId: string;
   personalRootFolderUrl: string;
   personalRootPath: string;

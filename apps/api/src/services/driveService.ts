@@ -1617,6 +1617,41 @@ export class DriveService {
   // Personal User Drives & Role Hierarchy
   // ==========================================
 
+  static async shareFolderWithUser(folderId: string, email: string): Promise<boolean> {
+    const cleanEmail = (email || '').trim().toLowerCase();
+    if (!cleanEmail || !cleanEmail.includes('@')) return false;
+
+    const token = await this.getValidAccessToken();
+    if (!token || folderId.startsWith('user-drive-') || folderId.startsWith('sub-')) return false;
+
+    try {
+      const res = await fetch(`https://www.googleapis.com/drive/v3/files/${folderId}/permissions?sendNotificationEmail=true&supportsAllDrives=true`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          role: 'writer',
+          type: 'user',
+          emailAddress: cleanEmail
+        })
+      });
+
+      if (res.ok) {
+        console.log(`[DriveService] Successfully shared Google Drive folder ${folderId} with ${cleanEmail} (role: writer)`);
+        return true;
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        console.warn(`[DriveService] Drive permission share warning for ${cleanEmail}:`, JSON.stringify(errData));
+        return false;
+      }
+    } catch (err: any) {
+      console.warn(`[DriveService] Error sharing folder with ${cleanEmail}:`, err.message);
+      return false;
+    }
+  }
+
   static getPersonalDriveTemplates(role: UserRole): string[] {
     switch (role) {
       case 'PHOTOGRAPHER':
@@ -1694,11 +1729,16 @@ export class DriveService {
         }))
       };
 
+      if (user.email && user.email.includes('@') && !existingPersonalRoot.drive_folder_id.startsWith('user-drive-')) {
+        this.shareFolderWithUser(existingPersonalRoot.drive_folder_id, user.email).catch(() => {});
+      }
+
       return {
         userId: user.id,
         userName: user.full_name,
         role,
         structureMode: existingPersonalRoot.folder_name.includes('FULL EVENT') ? 'FULL_EVENT' : 'ROLE_SPECIFIC',
+        sharedWithEmail: user.email,
         personalRootFolderId: existingPersonalRoot.drive_folder_id,
         personalRootFolderUrl: existingPersonalRoot.drive_web_url,
         personalRootPath: existingPersonalRoot.folder_path,
@@ -1815,6 +1855,13 @@ export class DriveService {
       }))
     };
 
+    const userEmail = (user.email || '').trim().toLowerCase();
+    let sharedWithEmail: string | undefined = undefined;
+    if (userEmail && userEmail.includes('@') && !userDriveFolderId.startsWith('user-drive-')) {
+      const shared = await this.shareFolderWithUser(userDriveFolderId, userEmail);
+      if (shared) sharedWithEmail = userEmail;
+    }
+
     console.log(`[DriveService] Successfully provisioned personal drive for ${user.full_name} (${role}) with ${subfolders.length} subfolders.`);
 
     return {
@@ -1822,6 +1869,7 @@ export class DriveService {
       userName: user.full_name,
       role,
       structureMode: 'ROLE_SPECIFIC',
+      sharedWithEmail,
       personalRootFolderId: userDriveFolderId,
       personalRootFolderUrl: personalRootRecord.drive_web_url,
       personalRootPath,
@@ -1973,7 +2021,14 @@ export class DriveService {
       }))
     };
 
-    console.log(`[DriveService] Reconfigured personal drive for ${user.full_name} (${role}) in mode ${options.structureMode} with ${subfolders.length} subfolders.`);
+    const targetEmail = (options.customEmail || user.email || '').trim().toLowerCase();
+    let sharedWithEmail: string | undefined = undefined;
+    if (targetEmail && targetEmail.includes('@') && !userDriveFolderId.startsWith('user-drive-')) {
+      const shared = await this.shareFolderWithUser(userDriveFolderId, targetEmail);
+      if (shared) sharedWithEmail = targetEmail;
+    }
+
+    console.log(`[DriveService] Reconfigured personal drive for ${user.full_name} (${role}) in mode ${options.structureMode} with ${subfolders.length} subfolders. (Shared with: ${sharedWithEmail || 'none'})`);
 
     return {
       userId: user.id,
@@ -1981,6 +2036,7 @@ export class DriveService {
       role,
       structureMode: options.structureMode,
       customEmail: options.customEmail,
+      sharedWithEmail,
       personalRootFolderId: userDriveFolderId,
       personalRootFolderUrl: personalRootRecord.drive_web_url,
       personalRootPath,

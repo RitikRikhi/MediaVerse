@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { api } from '../../lib/api';
-import { FolderNode, PersonalDriveInfo, PersonalSubfolder, UserRole } from '../../types';
+import { FolderNode, PersonalDriveInfo, UserRole } from '../../types';
 import { Modal } from '../ui/Modal';
 import {
   Folder,
@@ -18,16 +18,8 @@ import {
   ExternalLink,
   Search,
   RefreshCw,
-  Sparkles,
-  Settings,
-  Shield,
-  Layers,
-  Calendar,
-  AlertCircle,
-  X,
-  Edit2,
-  Trash2,
-  Zap
+  Mail,
+  X
 } from 'lucide-react';
 
 interface InteractiveFolderTreeProps {
@@ -60,6 +52,7 @@ export const InteractiveFolderTree: React.FC<InteractiveFolderTreeProps> = ({
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set(['root']));
   const [toastMessage, setToastMessage] = useState<string>('');
+  const [toastLink, setToastLink] = useState<string | null>(null);
 
   // Inline subfolder creation state
   const [addingSubfolderParentId, setAddingSubfolderParentId] = useState<string | null>(null);
@@ -73,14 +66,14 @@ export const InteractiveFolderTree: React.FC<InteractiveFolderTreeProps> = ({
   const [wizardEmail, setWizardEmail] = useState<string>(currentUser?.email || '');
   const [isSettingUpDrive, setIsSettingUpDrive] = useState<boolean>(false);
 
-  // Rename & Delete state for personal subfolders
-  const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
-  const [editingFolderName, setEditingFolderName] = useState<string>('');
-
   // Show temporary toast notification
-  const notify = (msg: string) => {
+  const notify = (msg: string, link?: string) => {
     setToastMessage(msg);
-    setTimeout(() => setToastMessage(''), 4000);
+    setToastLink(link || null);
+    setTimeout(() => {
+      setToastMessage('');
+      setToastLink(null);
+    }, 6000);
   };
 
   // Fetch unified tree and personal drive
@@ -90,7 +83,6 @@ export const InteractiveFolderTree: React.FC<InteractiveFolderTreeProps> = ({
       const res = await api.getDriveTree();
       if (res && res.masterTree) {
         setMasterTree(res.masterTree);
-        // Auto-expand root and top-level day folders by default
         const initialExpanded = new Set<string>(['root', res.masterTree.path]);
         if (res.masterTree.children) {
           res.masterTree.children.forEach(c => initialExpanded.add(c.path));
@@ -144,21 +136,15 @@ export const InteractiveFolderTree: React.FC<InteractiveFolderTreeProps> = ({
   // Icon helper based on folder name / path
   const getFolderIcon = (name: string, path: string, isPersonal = false) => {
     const lower = `${name} ${path}`.toLowerCase();
-    if (isPersonal) return <User className="w-4 h-4 text-amber-500 shrink-0" />;
+    if (isPersonal) return <User className="w-4 h-4 text-slate-700 shrink-0" />;
     if (lower.includes('photo') || lower.includes('still') || lower.includes('raw_photo')) {
-      return <Camera className="w-4 h-4 text-emerald-500 shrink-0" />;
+      return <Camera className="w-4 h-4 text-red-600 shrink-0" />;
     }
     if (lower.includes('video') || lower.includes('footage') || lower.includes('raw videography') || lower.includes('multicam') || lower.includes('stems')) {
-      return <Film className="w-4 h-4 text-blue-500 shrink-0" />;
+      return <Film className="w-4 h-4 text-red-600 shrink-0" />;
     }
     if (lower.includes('edit') || lower.includes('reel') || lower.includes('deliverable') || lower.includes('review')) {
-      return <Scissors className="w-4 h-4 text-purple-500 shrink-0" />;
-    }
-    if (lower.includes('day 1') || lower.includes('day 2') || lower.includes('day 3')) {
-      return <Calendar className="w-4 h-4 text-amber-600 shrink-0" />;
-    }
-    if (lower.includes('personal') || lower.includes('crew')) {
-      return <User className="w-4 h-4 text-amber-500 shrink-0" />;
+      return <Scissors className="w-4 h-4 text-slate-700 shrink-0" />;
     }
     return <Folder className="w-4 h-4 text-slate-400 shrink-0" />;
   };
@@ -175,19 +161,18 @@ export const InteractiveFolderTree: React.FC<InteractiveFolderTreeProps> = ({
         folderName: name
       });
 
-      notify(`✓ Created subfolder "${name}" in Google Drive!`);
+      notify(`Subfolder "${name}" created on Google Drive!`, res?.driveWebUrl);
       setAddingSubfolderParentId(null);
       setNewSubfolderName('');
 
       // Auto-expand parent node
       setExpandedNodes(prev => new Set(prev).add(parentPath));
 
-      // Auto-select this newly created subfolder as active upload target!
+      // Auto-select this newly created subfolder as active upload target
       if (res && res.driveFolderId) {
         onSelectFolder(res.driveFolderId, res.path || `${parentPath}/${name}`, activeTab === 'PERSONAL' ? 'PERSONAL' : 'OFFICIAL');
       }
 
-      // Reload full tree to keep in sync
       await loadTreeData();
     } catch (err: any) {
       alert(`Could not create subfolder: ${err.message || err}`);
@@ -198,18 +183,23 @@ export const InteractiveFolderTree: React.FC<InteractiveFolderTreeProps> = ({
 
   // Personal Drive Setup Wizard Submission
   const handleRunSetupWizard = async () => {
+    const emailToShare = wizardEmail.trim().toLowerCase();
     try {
       setIsSettingUpDrive(true);
       const updated = await api.setupPersonalDrive({
         role: wizardRole,
         structureMode: wizardMode,
-        customEmail: wizardEmail.trim() || undefined
+        customEmail: emailToShare || undefined
       });
 
       setPersonalDrive(updated);
       setShowSetupModal(false);
       setActiveTab('PERSONAL');
-      notify(`✓ Successfully configured Personal Google Drive for ${updated.userName}!`);
+
+      const shareNotice = emailToShare
+        ? `Shared directly with your Gmail (${emailToShare}). Check Google Drive under "Shared with me"!`
+        : `Personal Drive created!`;
+      notify(shareNotice, updated.personalRootFolderUrl);
 
       // Auto-select personal root or first subfolder
       if (updated.subfolders && updated.subfolders.length > 0) {
@@ -224,32 +214,6 @@ export const InteractiveFolderTree: React.FC<InteractiveFolderTreeProps> = ({
       alert(`Failed to configure personal drive: ${err.message || err}`);
     } finally {
       setIsSettingUpDrive(false);
-    }
-  };
-
-  // Personal Subfolder Rename
-  const handleRenameSubfolder = async (folderId: string) => {
-    if (!editingFolderName.trim()) return;
-    try {
-      const updated = await api.renameMyPersonalFolder(folderId, editingFolderName.trim());
-      notify(`✓ Renamed to "${updated.name}"`);
-      setEditingFolderId(null);
-      setEditingFolderName('');
-      await loadTreeData();
-    } catch (err: any) {
-      alert(`Failed to rename folder: ${err.message}`);
-    }
-  };
-
-  // Personal Subfolder Delete
-  const handleDeleteSubfolder = async (folderId: string) => {
-    if (!confirm('Are you sure you want to delete this folder from Google Drive?')) return;
-    try {
-      await api.deleteMyPersonalFolder(folderId);
-      notify('✓ Folder deleted from Google Drive.');
-      await loadTreeData();
-    } catch (err: any) {
-      alert(`Failed to delete folder: ${err.message}`);
     }
   };
 
@@ -297,54 +261,48 @@ export const InteractiveFolderTree: React.FC<InteractiveFolderTreeProps> = ({
 
     return (
       <div key={node.path || node.id || node.name} className="select-none">
-        {/* Node Row */}
+        {/* Spacious Node Row */}
         <div
-          className={`group flex items-center justify-between py-1.5 px-2 rounded-xl transition-all cursor-pointer ${
+          className={`group flex items-center justify-between py-2.5 px-3 rounded-xl transition-all cursor-pointer border ${
             isSelected
-              ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-950 font-bold'
-              : 'hover:bg-slate-100/80 text-slate-700'
+              ? 'bg-red-50/70 border-red-300 text-slate-900 font-semibold'
+              : 'border-transparent hover:bg-slate-50 hover:border-slate-200 text-slate-700'
           }`}
-          style={{ paddingLeft: `${Math.max(8, depth * 20 + 8)}px` }}
+          style={{ paddingLeft: `${Math.max(12, depth * 24 + 12)}px` }}
           onClick={() => {
             if (node.driveFolderId) {
               onSelectFolder(node.driveFolderId, node.path, isPersonal ? 'PERSONAL' : 'OFFICIAL');
             }
           }}
         >
-          {/* Left: Chevron + Icon + Name */}
-          <div className="flex items-center gap-2 min-w-0 flex-1">
+          {/* Left: Chevron + Icon + Folder Name */}
+          <div className="flex items-center gap-3 min-w-0 flex-1">
             {hasChildren ? (
               <button
                 onClick={(e) => toggleExpand(node.path, e)}
-                className="p-1 rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 transition-colors"
-                title={isExpanded ? 'Collapse folder' : 'Expand folder'}
+                className="p-1 rounded-md text-slate-400 hover:text-slate-800 hover:bg-slate-100 transition-colors"
+                title={isExpanded ? 'Collapse' : 'Expand'}
               >
-                {isExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                {isExpanded ? <ChevronDown className="w-4 h-4 text-slate-600" /> : <ChevronRight className="w-4 h-4 text-slate-400" />}
               </button>
             ) : (
-              <span className="w-5" />
+              <span className="w-6" />
             )}
 
             {getFolderIcon(node.name, node.path, isPersonal)}
 
-            <span className={`text-xs truncate ${isSelected ? 'font-bold text-emerald-900' : 'font-medium'}`}>
+            <span className={`text-sm truncate ${isSelected ? 'font-bold text-red-950' : 'font-medium text-slate-800'}`}>
               {node.name}
             </span>
-
-            {node.driveFolderId && (
-              <span className="text-[10px] text-slate-400 font-mono hidden sm:inline px-1 py-0.2 rounded bg-slate-100">
-                ...{node.driveFolderId.slice(-6)}
-              </span>
-            )}
           </div>
 
-          {/* Right: Actions */}
-          <div className="flex items-center gap-1.5 shrink-0 opacity-90 sm:opacity-0 group-hover:opacity-100 transition-opacity">
-            {/* Active Target Badge or Select Target Button */}
+          {/* Right: Actions with proper spacing */}
+          <div className="flex items-center gap-2 shrink-0">
+            {/* Active Target Indicator / Button */}
             {isSelected ? (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-600 text-white shadow-xs">
-                <Check className="w-3 h-3" />
-                <span>Active Target</span>
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold bg-red-600 text-white shadow-2xs">
+                <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+                <span>Selected Target</span>
               </span>
             ) : (
               <button
@@ -354,82 +312,81 @@ export const InteractiveFolderTree: React.FC<InteractiveFolderTreeProps> = ({
                     onSelectFolder(node.driveFolderId, node.path, isPersonal ? 'PERSONAL' : 'OFFICIAL');
                   }
                 }}
-                className="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-slate-200/80 hover:bg-emerald-600 hover:text-white text-slate-700 transition-colors"
-                title="Set as upload target for upcoming files"
+                className="px-3 py-1 rounded-lg text-xs font-medium text-slate-600 bg-white border border-slate-200 hover:border-red-500 hover:text-red-600 transition-colors"
               >
-                Set Target
+                Select Target
               </button>
             )}
 
-            {/* Quick [➕ Subfolder] Button */}
+            {/* Subfolder Button */}
             <button
               onClick={(e) => {
                 e.stopPropagation();
                 setAddingSubfolderParentId(node.driveFolderId || node.path);
                 setNewSubfolderName('');
               }}
-              className="p-1 rounded-lg text-slate-500 hover:text-blue-600 hover:bg-blue-50 transition-colors"
-              title="Add a new subfolder inside this folder"
+              className="p-1.5 rounded-lg text-slate-500 hover:text-red-600 hover:bg-red-50 border border-transparent hover:border-red-200 transition-colors"
+              title="Add subfolder"
             >
-              <FolderPlus className="w-3.5 h-3.5" />
+              <FolderPlus className="w-4 h-4" />
             </button>
 
-            {/* Direct Open in Google Drive Link */}
+            {/* Open in Drive Link */}
             {driveUrl && (
               <a
                 href={driveUrl}
                 target="_blank"
                 rel="noreferrer"
                 onClick={(e) => e.stopPropagation()}
-                className="p-1 rounded-lg text-slate-400 hover:text-slate-800 hover:bg-slate-200/70 transition-colors"
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
                 title="Open in Google Drive"
               >
-                <ExternalLink className="w-3.5 h-3.5" />
+                <ExternalLink className="w-4 h-4" />
               </a>
             )}
           </div>
         </div>
 
-        {/* Inline Subfolder Creation Row */}
+        {/* Inline Subfolder Creation Row with comfortable spacing */}
         {isAddingSubfolder && (
           <div
-            className="my-1.5 p-2 rounded-xl bg-blue-50/70 border border-blue-200 flex flex-col sm:flex-row items-stretch sm:items-center gap-2 animate-in fade-in duration-150"
-            style={{ marginLeft: `${Math.max(12, depth * 20 + 24)}px` }}
+            className="my-2 p-3 rounded-xl bg-slate-50 border border-slate-200 flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 animate-fade-in"
+            style={{ marginLeft: `${Math.max(16, depth * 24 + 32)}px` }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center gap-2 flex-1">
-              <FolderPlus className="w-4 h-4 text-blue-600 shrink-0" />
+            <div className="flex items-center gap-2.5 flex-1">
+              <FolderPlus className="w-4 h-4 text-red-600 shrink-0" />
               <input
                 type="text"
                 autoFocus
-                placeholder={`Subfolder name under "${node.name}" (e.g. Drone Shots, Backstage)...`}
+                placeholder={`Subfolder name under "${node.name}"...`}
                 value={newSubfolderName}
                 onChange={(e) => setNewSubfolderName(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') handleCreateSubfolder(node.driveFolderId || '', node.path);
                   if (e.key === 'Escape') setAddingSubfolderParentId(null);
                 }}
-                className="w-full text-xs px-2.5 py-1 rounded-lg bg-white border border-blue-300 focus:outline-hidden focus:ring-1 focus:ring-blue-500"
+                className="w-full text-xs px-3 py-2 rounded-lg bg-white border border-slate-300 focus:outline-hidden focus:border-red-600"
               />
             </div>
-            <div className="flex items-center gap-1.5 shrink-0 justify-end">
+            <div className="flex items-center gap-2 shrink-0 justify-end">
               <button
                 onClick={() => handleCreateSubfolder(node.driveFolderId || '', node.path)}
                 disabled={isSubmittingSubfolder || !newSubfolderName.trim()}
-                className="px-3 py-1 rounded-lg text-[11px] font-bold bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50 flex items-center gap-1"
+                className="px-4 py-2 rounded-lg text-xs font-bold bg-red-600 hover:bg-red-700 text-white disabled:opacity-50 flex items-center gap-1.5"
               >
                 {isSubmittingSubfolder ? (
                   <>
-                    <RefreshCw className="w-3 h-3 animate-spin" />
-                    <span>Creating in Drive...</span>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Creating...</span>
                   </>
                 ) : (
-                  <span>Create Subfolder</span>
+                  <span>Add Subfolder</span>
                 )}
               </button>
               <button
                 onClick={() => setAddingSubfolderParentId(null)}
-                className="px-2 py-1 rounded-lg text-[11px] font-semibold text-slate-600 hover:bg-slate-200"
+                className="px-3 py-2 rounded-lg text-xs font-medium text-slate-600 hover:bg-slate-200"
               >
                 Cancel
               </button>
@@ -437,9 +394,9 @@ export const InteractiveFolderTree: React.FC<InteractiveFolderTreeProps> = ({
           </div>
         )}
 
-        {/* Render Children if Expanded */}
+        {/* Children Rows */}
         {hasChildren && isExpanded && (
-          <div className="border-l border-slate-200/60 ml-4">
+          <div className="border-l-2 border-slate-100 ml-5 my-0.5 space-y-0.5">
             {node.children!.map((child) => renderTreeNode(child, depth + 1, isPersonal))}
           </div>
         )}
@@ -448,56 +405,69 @@ export const InteractiveFolderTree: React.FC<InteractiveFolderTreeProps> = ({
   };
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden animate-in fade-in duration-200">
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden animate-fade-in">
       {/* Toast Alert Banner */}
       {toastMessage && (
-        <div className="bg-emerald-600 text-white px-4 py-2 text-xs font-semibold flex items-center justify-between animate-fade-in">
-          <span>{toastMessage}</span>
-          <button onClick={() => setToastMessage('')} className="p-0.5 hover:bg-emerald-700 rounded">
-            <X className="w-3.5 h-3.5" />
-          </button>
+        <div className="bg-slate-900 text-white px-5 py-3 text-xs font-medium flex items-center justify-between gap-3 animate-fade-in">
+          <div className="flex items-center gap-2 truncate">
+            <Check className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span className="truncate">{toastMessage}</span>
+          </div>
+          <div className="flex items-center gap-3 shrink-0">
+            {toastLink && (
+              <a
+                href={toastLink}
+                target="_blank"
+                rel="noreferrer"
+                className="text-red-400 hover:text-red-300 font-bold underline inline-flex items-center gap-1"
+              >
+                <span>Open in Drive</span>
+                <ExternalLink className="w-3 h-3" />
+              </a>
+            )}
+            <button onClick={() => setToastMessage('')} className="p-1 hover:bg-slate-800 rounded">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
       )}
 
-      {/* Top Header */}
-      <div className="p-4 sm:p-5 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-3 bg-gradient-to-r from-slate-50 via-white to-slate-50">
+      {/* Top Header with clean spacing and Red & White Theme */}
+      <div className="p-5 sm:p-6 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-50 text-red-700 border border-red-200 uppercase tracking-wider">
-              Google Drive Hierarchy
+            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-red-50 text-red-700 border border-red-200 uppercase tracking-wider">
+              Destination Selector
             </span>
-            <span className="text-xs text-slate-500 font-medium">Interactive Folder Tree</span>
           </div>
-          <h3 className="text-base font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
-            <HardDrive className="w-4 h-4 text-red-600" />
-            <span>Select & Organize Upload Destination</span>
+          <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+            <HardDrive className="w-5 h-5 text-red-600" />
+            <span>Google Drive Folder Hierarchy</span>
           </h3>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Click any folder to set as the active upload target. Click <code className="text-blue-600 font-mono">[➕]</code> to create an instant subfolder on any node.
+          <p className="text-xs text-slate-500 mt-1">
+            Click any folder to set as upload destination. Click the subfolder icon to create folders inside.
           </p>
         </div>
 
         {/* Action Controls */}
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Personal Drive Wizard Trigger */}
+        <div className="flex items-center gap-3">
           <button
             onClick={() => {
               setWizardRole((activeRole as UserRole) || 'PHOTOGRAPHER');
               setWizardEmail(currentUser?.email || '');
               setShowSetupModal(true);
             }}
-            className="px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-600 text-white shadow-xs transition-all flex items-center gap-1.5"
-            title="Configure role-tailored or full event Personal Drive structure"
+            className="px-4 py-2.5 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-700 text-white shadow-2xs transition-colors flex items-center gap-2"
           >
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>Configure Personal Drive</span>
+            <Mail className="w-4 h-4" />
+            <span>Connect / Setup Gmail Drive</span>
           </button>
 
           {onClose && (
             <button
               onClick={onClose}
-              className="p-1.5 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100"
-              title="Close tree view"
+              className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 border border-slate-200 transition-colors"
+              title="Close"
             >
               <X className="w-4 h-4" />
             </button>
@@ -505,78 +475,74 @@ export const InteractiveFolderTree: React.FC<InteractiveFolderTreeProps> = ({
         </div>
       </div>
 
-      {/* Mode Switcher Tabs + Search + Tree Expand Buttons */}
-      <div className="p-3 bg-slate-50/70 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+      {/* Mode Switcher Tabs + Search with clean layout */}
+      <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         {/* Drive Source Tabs */}
-        <div className="flex items-center gap-1 p-1 rounded-xl bg-slate-200/70">
+        <div className="flex items-center gap-1.5 p-1 rounded-xl bg-white border border-slate-200">
           <button
             onClick={() => setActiveTab('MASTER')}
-            className={`px-3 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+            className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors ${
               activeTab === 'MASTER'
-                ? 'bg-white text-slate-900 shadow-2xs'
-                : 'text-slate-600 hover:text-slate-900'
+                ? 'bg-red-600 text-white shadow-2xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
             }`}
           >
-            <Shield className="w-3.5 h-3.5 text-red-600" />
-            <span>🏛️ SAVISKAR 2026 Master Tree</span>
+            SAVISKAR Official Folders
           </button>
           <button
             onClick={() => setActiveTab('PERSONAL')}
-            className={`px-3 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+            className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors ${
               activeTab === 'PERSONAL'
-                ? 'bg-white text-slate-900 shadow-2xs'
-                : 'text-slate-600 hover:text-slate-900'
+                ? 'bg-red-600 text-white shadow-2xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
             }`}
           >
-            <User className="w-3.5 h-3.5 text-amber-600" />
-            <span>👤 My Personal Drive ({personalDrive?.userName || currentUser?.full_name || 'Crew'})</span>
+            My Personal Drive {personalDrive?.sharedWithEmail ? `(${personalDrive.sharedWithEmail})` : ''}
           </button>
         </div>
 
         {/* Search & Collapse Controls */}
         <div className="flex items-center gap-2">
-          <div className="relative flex-1 sm:w-56">
-            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+          <div className="relative flex-1 sm:w-64">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
               placeholder="Filter folders..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full text-xs pl-8 pr-7 py-1.5 rounded-xl border border-slate-300 focus:outline-hidden focus:border-red-500 bg-white"
+              className="w-full text-xs pl-9 pr-8 py-2 rounded-xl border border-slate-300 focus:outline-hidden focus:border-red-600 bg-white"
             />
             {searchQuery && (
               <button
                 onClick={() => setSearchQuery('')}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
               >
-                <X className="w-3 h-3" />
+                <X className="w-3.5 h-3.5" />
               </button>
             )}
           </div>
 
           <button
             onClick={handleExpandAll}
-            className="px-2 py-1.5 rounded-lg text-[11px] font-semibold text-slate-600 hover:bg-slate-200/70"
-            title="Expand all folders"
+            className="px-3 py-2 rounded-xl text-xs font-medium text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 transition-colors"
           >
-            Expand
+            Expand All
           </button>
           <button
             onClick={handleCollapseAll}
-            className="px-2 py-1.5 rounded-lg text-[11px] font-semibold text-slate-600 hover:bg-slate-200/70"
-            title="Collapse all folders"
+            className="px-3 py-2 rounded-xl text-xs font-medium text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 transition-colors"
           >
-            Collapse
+            Collapse All
           </button>
         </div>
       </div>
 
       {/* Currently Selected Active Target Header Bar */}
-      <div className="px-4 py-2 bg-emerald-50 border-b border-emerald-200/80 flex items-center justify-between gap-2 text-xs">
-        <div className="flex items-center gap-2 truncate">
-          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
-          <span className="font-bold text-emerald-950 shrink-0">Upload Target:</span>
-          <span className="font-mono text-emerald-800 truncate" title={selectedFolderPath}>
+      <div className="px-5 py-3 bg-red-50/60 border-b border-red-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="w-2.5 h-2.5 rounded-full bg-red-600 shrink-0" />
+          <span className="font-bold text-slate-900 shrink-0">Upload Target:</span>
+          <span className="font-semibold text-red-950 truncate" title={selectedFolderPath}>
             {selectedFolderPath || 'SAVISKAR 2026 > Day 1 > Photography'}
           </span>
         </div>
@@ -585,42 +551,28 @@ export const InteractiveFolderTree: React.FC<InteractiveFolderTreeProps> = ({
             href={`https://drive.google.com/drive/folders/${selectedFolderId}`}
             target="_blank"
             rel="noreferrer"
-            className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-900 hover:underline shrink-0"
+            className="inline-flex items-center gap-1.5 text-xs font-bold text-red-700 hover:text-red-800 hover:underline shrink-0"
           >
             <span>Open in Drive</span>
-            <ExternalLink className="w-3 h-3" />
+            <ExternalLink className="w-3.5 h-3.5" />
           </a>
         )}
       </div>
 
-      {/* Main Folder Tree View */}
-      <div className="p-4 max-h-[480px] overflow-y-auto space-y-1">
+      {/* Main Folder Tree View with proper breathing room */}
+      <div className="p-4 sm:p-5 max-h-[500px] overflow-y-auto space-y-1">
         {isLoading ? (
-          <div className="p-8 text-center text-xs text-slate-400">
-            <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-red-600" />
+          <div className="p-12 text-center text-xs text-slate-500">
+            <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-red-600" />
             Loading Google Drive hierarchy...
           </div>
         ) : !displayedTree ? (
-          <div className="p-8 text-center text-xs text-slate-500">
-            No folder matching "{searchQuery}".
+          <div className="p-12 text-center text-xs text-slate-500">
+            No folders found matching "{searchQuery}".
           </div>
         ) : (
           renderTreeNode(displayedTree, 0, activeTab === 'PERSONAL')
         )}
-      </div>
-
-      {/* Footer Info & Instructions */}
-      <div className="p-3 bg-slate-50 border-t border-slate-200 text-[11px] text-slate-500 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <span className="font-semibold text-slate-700">Legend:</span>
-          <span className="inline-flex items-center gap-1"><Camera className="w-3 h-3 text-emerald-600" /> Photography</span>
-          <span className="inline-flex items-center gap-1"><Film className="w-3 h-3 text-blue-600" /> 4K Video</span>
-          <span className="inline-flex items-center gap-1"><Scissors className="w-3 h-3 text-purple-600" /> Editing</span>
-          <span className="inline-flex items-center gap-1"><User className="w-3 h-3 text-amber-600" /> Personal</span>
-        </div>
-        <div className="text-slate-400">
-          Google Drive Root: <code className="font-mono text-slate-600 font-semibold">1PNvblS0BffXR12av3dC7fP7wNdf948kO</code>
-        </div>
       </div>
 
       {/* PERSONAL GOOGLE DRIVE SETUP WIZARD MODAL */}
@@ -629,190 +581,171 @@ export const InteractiveFolderTree: React.FC<InteractiveFolderTreeProps> = ({
         onClose={() => {
           if (!isSettingUpDrive) setShowSetupModal(false);
         }}
-        title="⚡ Configure Your Personal Google Drive Workspace"
+        title="Configure & Share Google Drive"
         maxWidth="lg"
       >
-        <div className="space-y-5 text-xs text-slate-600">
+        <div className="space-y-6 text-xs text-slate-700 p-1">
           <div>
-            <p className="text-slate-600 leading-relaxed">
-              Generate a tailored Google Drive folder structure under your name for SAVISKAR 2026.
-              You can choose whether to generate a curated role-specific folder list or the full festival directory.
+            <p className="text-slate-600 leading-relaxed text-sm">
+              Enter your Gmail address below. We will automatically create your personal folder structure on Google Drive and <strong>share it directly to your Gmail account as an Editor</strong>. You'll see it under <strong>"Shared with me"</strong> on your Google Drive.
             </p>
           </div>
 
           {/* Question 1: Role Selection */}
-          <div className="space-y-2">
+          <div className="space-y-2.5">
             <label className="font-bold text-slate-900 block text-xs">
-              Step 1: Choose Your Media Crew Role
+              1. Choose Your Media Role
             </label>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <button
                 type="button"
                 onClick={() => setWizardRole('PHOTOGRAPHER')}
-                className={`p-3 rounded-xl border text-left transition-all flex flex-col gap-1.5 ${
+                className={`p-4 rounded-xl border text-left transition-all flex flex-col gap-1.5 ${
                   wizardRole === 'PHOTOGRAPHER'
-                    ? 'bg-emerald-50 border-emerald-500 ring-2 ring-emerald-500/20'
+                    ? 'bg-red-50/70 border-red-500 ring-2 ring-red-500/20'
                     : 'bg-white hover:bg-slate-50 border-slate-200'
                 }`}
               >
                 <div className="flex items-center gap-2 font-bold text-slate-900 text-xs">
-                  <Camera className="w-4 h-4 text-emerald-600" />
-                  <span>📸 Photographer</span>
+                  <Camera className="w-4 h-4 text-red-600" />
+                  <span>Photographer</span>
                 </div>
-                <p className="text-[11px] text-slate-500">
-                  Morning Stills, Rock Concert RAWs, Trophy Lifts & High-Res Selects.
+                <p className="text-[11px] text-slate-500 mt-1">
+                  RAWs, Stills, Highlights & Selects
                 </p>
               </button>
 
               <button
                 type="button"
                 onClick={() => setWizardRole('VIDEOGRAPHER')}
-                className={`p-3 rounded-xl border text-left transition-all flex flex-col gap-1.5 ${
+                className={`p-4 rounded-xl border text-left transition-all flex flex-col gap-1.5 ${
                   wizardRole === 'VIDEOGRAPHER'
-                    ? 'bg-blue-50 border-blue-500 ring-2 ring-blue-500/20'
+                    ? 'bg-red-50/70 border-red-500 ring-2 ring-red-500/20'
                     : 'bg-white hover:bg-slate-50 border-slate-200'
                 }`}
               >
                 <div className="flex items-center gap-2 font-bold text-slate-900 text-xs">
-                  <Film className="w-4 h-4 text-blue-600" />
-                  <span>🎥 Videographer</span>
+                  <Film className="w-4 h-4 text-red-600" />
+                  <span>Videographer</span>
                 </div>
-                <p className="text-[11px] text-slate-500">
-                  4K B-Roll, Multi-Cam Concert, 120fps Slow-Mo & Soundboard Audio Stems.
+                <p className="text-[11px] text-slate-500 mt-1">
+                  4K Footage, Multi-Cam & Audio Stems
                 </p>
               </button>
 
               <button
                 type="button"
                 onClick={() => setWizardRole('VIDEO_EDITOR')}
-                className={`p-3 rounded-xl border text-left transition-all flex flex-col gap-1.5 ${
+                className={`p-4 rounded-xl border text-left transition-all flex flex-col gap-1.5 ${
                   wizardRole === 'VIDEO_EDITOR'
-                    ? 'bg-purple-50 border-purple-500 ring-2 ring-purple-500/20'
+                    ? 'bg-red-50/70 border-red-500 ring-2 ring-red-500/20'
                     : 'bg-white hover:bg-slate-50 border-slate-200'
                 }`}
               >
                 <div className="flex items-center gap-2 font-bold text-slate-900 text-xs">
-                  <Scissors className="w-4 h-4 text-purple-600" />
-                  <span>🎬 Video Editor</span>
+                  <Scissors className="w-4 h-4 text-red-600" />
+                  <span>Video Editor</span>
                 </div>
-                <p className="text-[11px] text-slate-500">
-                  Instagram 9:16 Reels, Recap Masters, Project Files & Export Reviews.
+                <p className="text-[11px] text-slate-500 mt-1">
+                  9:16 Reels, Recap Masters & Projects
                 </p>
               </button>
             </div>
           </div>
 
-          {/* Question 2: Google Account / Email */}
+          {/* Question 2: Gmail Address to Share Drive */}
           <div className="space-y-2">
             <label className="font-bold text-slate-900 block text-xs">
-              Step 2: Google Account / Email (For Reference & Notification)
+              2. Your Gmail Address (Drive will be shared to this account)
             </label>
-            <input
-              type="email"
-              value={wizardEmail}
-              onChange={(e) => setWizardEmail(e.target.value)}
-              placeholder="e.g. yourname@gmail.com"
-              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:outline-hidden focus:border-red-500 bg-white text-xs font-mono"
-            />
+            <div className="relative">
+              <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="email"
+                required
+                value={wizardEmail}
+                onChange={(e) => setWizardEmail(e.target.value)}
+                placeholder="yourname@gmail.com"
+                className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-300 focus:outline-hidden focus:border-red-600 bg-white text-xs font-medium"
+              />
+            </div>
             <p className="text-[11px] text-slate-500">
-              Personal folders will be created inside the master festival drive under your name and tagged with this email.
+              ✓ Google Drive will invite this Gmail as an Editor so the folders immediately appear in your Drive.
             </p>
           </div>
 
-          {/* Question 3: Structure Mode (Role Specific vs Full Event Structure) */}
-          <div className="space-y-2">
+          {/* Question 3: Structure Mode */}
+          <div className="space-y-2.5">
             <label className="font-bold text-slate-900 block text-xs">
-              Step 3: Select Directory Structure Mode
+              3. Folder Structure Mode
             </label>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <button
                 type="button"
                 onClick={() => setWizardMode('ROLE_SPECIFIC')}
-                className={`p-3.5 rounded-xl border text-left transition-all flex flex-col gap-2 ${
+                className={`p-4 rounded-xl border text-left transition-all flex flex-col gap-2 ${
                   wizardMode === 'ROLE_SPECIFIC'
-                    ? 'bg-amber-50 border-amber-500 ring-2 ring-amber-500/20'
+                    ? 'bg-red-50/70 border-red-500 ring-2 ring-red-500/20'
                     : 'bg-white hover:bg-slate-50 border-slate-200'
                 }`}
               >
                 <div className="flex items-center justify-between">
-                  <span className="font-bold text-xs text-slate-900 flex items-center gap-1.5">
-                    <Zap className="w-4 h-4 text-amber-600" />
-                    <span>Role-Tailored Event List</span>
+                  <span className="font-bold text-xs text-slate-900">
+                    Role-Tailored List
                   </span>
-                  <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-amber-200 text-amber-900">
+                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-700">
                     Recommended
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-500 leading-snug">
-                  Creates 5 curated, role-specific event subfolders for SAVISKAR 2026. Super clear, minimal, and fast to navigate during live shooting.
+                  5 clean event folders specific to your role. Keeps your drive neat and focused.
                 </p>
-                <div className="mt-1 p-2 rounded-lg bg-white border border-amber-200/80 text-[10px] text-slate-600 space-y-0.5 font-mono">
-                  <div>📁 01 - Day 1 Morning</div>
-                  <div>📁 02 - Day 1 Evening Rock Concert</div>
-                  <div>📁 03 - Day 2 Tech Arena</div>
-                  <div>📁 04 - Day 2 Valedictory</div>
-                  <div>📁 05 - Highlights & Selects</div>
-                </div>
               </button>
 
               <button
                 type="button"
                 onClick={() => setWizardMode('FULL_EVENT')}
-                className={`p-3.5 rounded-xl border text-left transition-all flex flex-col gap-2 ${
+                className={`p-4 rounded-xl border text-left transition-all flex flex-col gap-2 ${
                   wizardMode === 'FULL_EVENT'
-                    ? 'bg-indigo-50 border-indigo-500 ring-2 ring-indigo-500/20'
+                    ? 'bg-red-50/70 border-red-500 ring-2 ring-red-500/20'
                     : 'bg-white hover:bg-slate-50 border-slate-200'
                 }`}
               >
                 <div className="flex items-center justify-between">
-                  <span className="font-bold text-xs text-slate-900 flex items-center gap-1.5">
-                    <Layers className="w-4 h-4 text-indigo-600" />
-                    <span>Full Festival Directory</span>
-                  </span>
-                  <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-indigo-100 text-indigo-900">
-                    Full Archive
+                  <span className="font-bold text-xs text-slate-900">
+                    Full Festival Archive
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-500 leading-snug">
-                  Creates the complete 9-folder festival tree under your name (Day 1, Day 2, Day 3, Social Media Reels, Branding). Ideal for multi-disciplinary crew.
+                  Full 9-folder festival directory (Day 1, Day 2, Day 3, Reels, Branding).
                 </p>
-                <div className="mt-1 p-2 rounded-lg bg-white border border-indigo-200/80 text-[10px] text-slate-600 space-y-0.5 font-mono">
-                  <div>📁 Day 1 - Photography & Video</div>
-                  <div>📁 Day 2 - Photography & Video</div>
-                  <div>📁 Day 3 - Valedictory & Awards</div>
-                  <div>📁 Social Media Reels (9-16)</div>
-                  <div>📁 Master Branding & Logos</div>
-                </div>
               </button>
             </div>
           </div>
 
           {/* Submission Button */}
-          <div className="pt-3 border-t border-slate-200 flex items-center justify-end gap-2">
+          <div className="pt-4 border-t border-slate-200 flex items-center justify-end gap-3">
             <button
               type="button"
               disabled={isSettingUpDrive}
               onClick={() => setShowSetupModal(false)}
-              className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100"
+              className="px-4 py-2.5 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100"
             >
               Cancel
             </button>
             <button
               type="button"
-              disabled={isSettingUpDrive}
+              disabled={isSettingUpDrive || !wizardEmail.trim()}
               onClick={handleRunSetupWizard}
-              className="px-5 py-2.5 rounded-xl text-xs font-bold bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-700 hover:to-amber-700 text-white shadow-xs flex items-center gap-2"
+              className="px-6 py-2.5 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white shadow-2xs flex items-center gap-2 transition-colors"
             >
               {isSettingUpDrive ? (
                 <>
                   <RefreshCw className="w-4 h-4 animate-spin" />
-                  <span>Provisioning Google Drive...</span>
+                  <span>Sharing to your Gmail Drive...</span>
                 </>
               ) : (
-                <>
-                  <Sparkles className="w-4 h-4" />
-                  <span>⚡ Build My Google Drive Structure</span>
-                </>
+                <span>Create & Share to My Gmail</span>
               )}
             </button>
           </div>
