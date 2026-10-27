@@ -161,6 +161,7 @@ export async function uploadDirectToGoogleDrive(options: DirectUploadOptions): P
 
         const chunkBlob = file.slice(startByte, endByte);
         const xhr = new XMLHttpRequest();
+        xhr.timeout = 45000; // 45s timeout per chunk prevents stalled sockets from hanging queue
         xhr.open('PUT', uploadUrl, true);
         xhr.setRequestHeader('Content-Range', `bytes ${startByte}-${endByte - 1}/${totalBytes}`);
         xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');

@@ -110,6 +110,11 @@ export const FieldCrewPortalPage: React.FC = () => {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dropzoneRef = useRef<HTMLDivElement>(null);
+  const uploadFilesRef = useRef<QueuedFile[]>([]);
+
+  useEffect(() => {
+    uploadFilesRef.current = uploadFiles;
+  }, [uploadFiles]);
 
   const loadAssignments = async () => {
     try {
@@ -294,8 +299,8 @@ export const FieldCrewPortalPage: React.FC = () => {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
   };
 
-  // Add files to queue and optimize if Turbo Mode is enabled
-  const handleFilesSelected = async (e: React.ChangeEvent<HTMLInputElement> | { target: { files: File[] } }) => {
+  // Add files to queue immediately with status QUEUED (JIT optimization is applied during streaming)
+  const handleFilesSelected = (e: React.ChangeEvent<HTMLInputElement> | { target: { files: File[] } }) => {
     const rawFiles = e.target.files ? Array.from(e.target.files) : [];
     if (rawFiles.length === 0) return;
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -310,45 +315,15 @@ export const FieldCrewPortalPage: React.FC = () => {
         file,
         originalFile: file,
         originalSize: file.size,
-        previewUrl: isPhoto ? URL.createObjectURL(file) : undefined,
+        previewUrl: isPhoto && rawFiles.length <= 16 ? URL.createObjectURL(file) : undefined,
         mediaType,
-        status: turboMode && isPhoto ? 'OPTIMIZING' : 'QUEUED',
+        status: 'QUEUED',
         progress: 0
       };
     });
 
     setUploadFiles(prev => [...prev, ...newQueued]);
     setActiveTab('upload');
-
-    // Run client-side optimization in background
-    if (turboMode) {
-      for (const item of newQueued) {
-        if (item.mediaType === 'RAW_PHOTO') {
-          try {
-            const opt = await optimizeImageFile(item.file);
-            setUploadFiles(prev =>
-              prev.map(f => {
-                if (f.id === item.id) {
-                  return {
-                    ...f,
-                    file: opt.file,
-                    previewUrl: opt.previewUrl || f.previewUrl,
-                    isOptimized: opt.isOptimized,
-                    reductionPercent: opt.reductionPercent,
-                    status: 'QUEUED'
-                  };
-                }
-                return f;
-              })
-            );
-          } catch {
-            setUploadFiles(prev =>
-              prev.map(f => (f.id === item.id ? { ...f, status: 'QUEUED' } : f))
-            );
-          }
-        }
-      }
-    }
   };
 
   const handleRemoveQueuedFile = (id: string) => {
@@ -378,8 +353,29 @@ export const FieldCrewPortalPage: React.FC = () => {
     let attempts = 0;
     while (attempts <= maxRetries) {
       try {
+        // Just-In-Time Turbo Mode optimization right before streaming this specific file
+        let fileToUpload = item.file;
+        if (turboMode && item.mediaType === 'RAW_PHOTO' && !item.isOptimized) {
+          setUploadFiles(prev =>
+            prev.map(f => (f.id === item.id ? { ...f, status: 'OPTIMIZING' } : f))
+          );
+          try {
+            const opt = await optimizeImageFile(item.file);
+            fileToUpload = opt.file;
+            item.file = opt.file;
+            item.isOptimized = opt.isOptimized;
+            item.reductionPercent = opt.reductionPercent;
+          } catch (e) {
+            console.warn('JIT optimization skipped, using original file:', e);
+          }
+        }
+
+        setUploadFiles(prev =>
+          prev.map(f => (f.id === item.id ? { ...f, status: 'UPLOADING', progress: 5 } : f))
+        );
+
         const result = await uploadDirectToGoogleDrive({
-          file: item.file,
+          file: fileToUpload,
           assignmentId: assignment.id,
           eventId: assignment.event_id,
           mediaType: item.mediaType,
@@ -429,7 +425,7 @@ export const FieldCrewPortalPage: React.FC = () => {
     return { success: false, error: 'Upload failed' };
   };
 
-  // High-Speed Concurrent Upload Pipeline (2 Parallel Streams)
+  // High-Speed Concurrent Upload Pipeline (3 Parallel Streams)
   const handleStartUpload = async () => {
     if (!selectedAssignment || uploadFiles.length === 0) return;
 
@@ -438,22 +434,33 @@ export const FieldCrewPortalPage: React.FC = () => {
       return;
     }
 
+    // Get all pending items (QUEUED or FAILED) from the live reference
+    const currentList = uploadFilesRef.current.length > 0 ? uploadFilesRef.current : uploadFiles;
+    const pendingList = currentList.filter(f => f.status === 'QUEUED' || f.status === 'FAILED');
+
+    if (pendingList.length === 0) {
+      return;
+    }
+
     setIsUploading(true);
     setUploadSummaryMessage('');
 
-    const pending = uploadFiles.filter(f => f.status === 'QUEUED' || f.status === 'FAILED');
-    const concurrency = 2; // 2 files uploading in parallel for max throughput
-    let currentIndex = 0;
+    let queueIndex = 0;
     let completedCount = 0;
+    let failedCount = 0;
+    const concurrency = Math.min(3, pendingList.length); // 3 files uploading in parallel for max throughput
 
     const worker = async () => {
-      while (currentIndex < pending.length) {
-        const item = pending[currentIndex++];
-        if (!item) break;
+      while (true) {
+        let itemIndex = -1;
+        if (queueIndex < pendingList.length) {
+          itemIndex = queueIndex++;
+        } else {
+          break; // Entire 100+ file queue finished!
+        }
 
-        setUploadFiles(prev =>
-          prev.map(f => (f.id === item.id ? { ...f, status: 'UPLOADING', progress: 5 } : f))
-        );
+        const item = pendingList[itemIndex];
+        if (!item) break;
 
         const res = await uploadSingleFileWithRetry(item, selectedAssignment);
 
@@ -473,6 +480,7 @@ export const FieldCrewPortalPage: React.FC = () => {
             )
           );
         } else {
+          failedCount++;
           setUploadFiles(prev =>
             prev.map(f =>
               f.id === item.id
@@ -489,22 +497,24 @@ export const FieldCrewPortalPage: React.FC = () => {
     };
 
     const workers = [];
-    for (let i = 0; i < Math.min(concurrency, pending.length); i++) {
+    for (let i = 0; i < concurrency; i++) {
       workers.push(worker());
     }
     await Promise.all(workers);
 
     setIsUploading(false);
 
+    const folderTargetDisplay = selectedFolderPath || destinationFolderInfo?.fullPath || 'SAVISKAR 2026';
     if (completedCount > 0) {
-      const folderTargetDisplay = selectedFolderPath || destinationFolderInfo?.fullPath || 'SAVISKAR 2026';
       setUploadSummaryMessage(
-        `✓ Uploaded ${completedCount} file(s) into Google Drive folder "${folderTargetDisplay}".`
+        failedCount === 0
+          ? `✓ Successfully uploaded all ${completedCount} file(s) into Google Drive folder "${folderTargetDisplay}".`
+          : `✓ Uploaded ${completedCount} file(s) into Google Drive folder "${folderTargetDisplay}" (${failedCount} failed - tap "Upload All" to retry failed).`
       );
-      const updatedMedia = await api.getMediaAssets({ assignment_id: selectedAssignment.id });
-      setAssignedMedia(updatedMedia);
-      const updatedAssignment = await api.getAssignment(selectedAssignment.id);
-      setSelectedAssignment(updatedAssignment);
+      api.getMediaAssets({ assignment_id: selectedAssignment.id }).then(setAssignedMedia).catch(() => {});
+      api.getAssignment(selectedAssignment.id).then(setSelectedAssignment).catch(() => {});
+    } else if (failedCount > 0) {
+      setUploadSummaryMessage(`Upload failed for ${failedCount} file(s). Please verify network and Google Drive connection.`);
     }
   };
 
@@ -1047,7 +1057,7 @@ export const FieldCrewPortalPage: React.FC = () => {
                             </h4>
                             {isUploading && (
                               <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-800 animate-pulse">
-                                Direct Drive Streaming (2x Parallel)
+                                Direct Drive Streaming (3x Parallel)
                               </span>
                             )}
                             {totalSavedBytes > 0 && !isUploading && (
@@ -1087,7 +1097,7 @@ export const FieldCrewPortalPage: React.FC = () => {
                             {isUploading ? (
                               <>
                                 <RefreshCw className="w-4 h-4 animate-spin" />
-                                <span>Uploading 2 at a time...</span>
+                                <span>Uploading 3 at a time...</span>
                               </>
                             ) : (
                               <>
