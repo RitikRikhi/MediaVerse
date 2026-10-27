@@ -382,11 +382,9 @@ mediaRouter.post(
         }
       });
     } catch (err: any) {
-      if (file && fs.existsSync(file.path)) {
-        try { await fs.promises.unlink(file.path); } catch {}
-      }
       console.error('[Media Upload Error]', err);
       const isAuthError = err.message?.includes('GOOGLE_DRIVE_NOT_CONNECTED') || err.message?.includes('not connected');
+      res.setHeader('Access-Control-Allow-Origin', '*');
       res.status(isAuthError ? 401 : 500).json({
         success: false,
         error: {
@@ -395,6 +393,10 @@ mediaRouter.post(
           authUrl: isAuthError ? DriveService.getOAuthUrl() : undefined
         }
       });
+    } finally {
+      if (file && fs.existsSync(file.path)) {
+        try { await fs.promises.unlink(file.path); } catch {}
+      }
     }
   }
 );

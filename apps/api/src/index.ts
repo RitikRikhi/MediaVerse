@@ -65,7 +65,7 @@ if (process.env.NODE_ENV !== 'test') {
     console.warn('[SupabaseService] Startup hydration error:', err);
   });
 
-  app.listen(config.port, '0.0.0.0', () => {
+  const server = app.listen(config.port, '0.0.0.0', () => {
     console.log(`=======================================================`);
     console.log(`🎬 DSA MediaVerse AI Backend Server Running`);
     console.log(`📍 Port: ${config.port}`);
@@ -75,6 +75,10 @@ if (process.env.NODE_ENV !== 'test') {
     console.log(`📡 Health Check: http://localhost:${config.port}${API_PREFIX}/health`);
     console.log(`=======================================================`);
   });
+
+  // Keep alive & headers timeouts for robust large file transfers
+  server.keepAliveTimeout = 120000;
+  server.headersTimeout = 125000;
 }
 
 export { app };

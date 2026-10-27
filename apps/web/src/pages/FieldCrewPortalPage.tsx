@@ -397,6 +397,7 @@ export const FieldCrewPortalPage: React.FC = () => {
       setUploadErrorMessage('');
 
       const uploadedResults: Array<{ name: string; url: string; folder: string }> = [];
+      const failedResults: Array<{ name: string; error: string }> = [];
       const totalFiles = selectedFiles.length;
 
       for (let i = 0; i < totalFiles; i++) {
@@ -440,25 +441,45 @@ export const FieldCrewPortalPage: React.FC = () => {
         if (activeAssignment?.event_id) formData.append('event_id', activeAssignment.event_id);
         formData.append('description', `Uploaded by field crew for ${activeAssignment?.title || 'SAVISKAR 2026'}`);
 
-        const res = await api.uploadMediaFile(formData, (percent) => {
-          setCurrentFileProgress(percent);
-          const overall = Math.round(((i + (percent / 100)) / totalFiles) * 100);
-          setOverallProgress(overall);
-        });
+        try {
+          const res = await api.uploadMediaFile(formData, (percent) => {
+            setCurrentFileProgress(percent);
+            const overall = Math.round(((i + (percent / 100)) / totalFiles) * 100);
+            setOverallProgress(overall);
+          });
 
-        uploadedResults.push({
-          name: currentFile.name,
-          url: res.asset?.drive_web_url || '',
-          folder: targetFolderPath
-        });
+          uploadedResults.push({
+            name: currentFile.name,
+            url: res.asset?.drive_web_url || '',
+            folder: targetFolderPath
+          });
+          setSuccessResults([...uploadedResults]);
+        } catch (fileErr: any) {
+          console.warn(`[Upload Error] File "${currentFile.name}" failed:`, fileErr);
+          failedResults.push({
+            name: currentFile.name,
+            error: fileErr.message || 'Network error'
+          });
+        }
       }
 
       setOverallProgress(100);
       setSuccessResults(uploadedResults);
-      setSelectedFiles([]);
+
+      if (failedResults.length > 0) {
+        // Keep only failed files in selection so user can re-trigger easily
+        const failedNames = new Set(failedResults.map(f => f.name));
+        setSelectedFiles(prev => prev.filter(f => failedNames.has(f.name)));
+        setUploadErrorMessage(
+          `${failedResults.length} of ${totalFiles} file(s) had network interruptions. ${uploadedResults.length} succeeded. You can click Start Upload to retry remaining files.`
+        );
+      } else {
+        setSelectedFiles([]);
+        setUploadErrorMessage('');
+      }
 
       // Refresh media feed
-      if (activeAssignment?.id && activeAssignment.id !== 'general-field-upload') {
+      if (activeAssignment?.id && activeAssignment.id !== 'general-field-upload' && uploadedResults.length > 0) {
         api.getMediaAssets({ assignment_id: activeAssignment.id }).then(setAssignedMedia).catch(() => {});
         api.getAssignment(activeAssignment.id).then(setSelectedAssignment).catch(() => {});
       }

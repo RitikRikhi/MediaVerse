@@ -202,9 +202,46 @@ class ApiClient {
     formData: FormData,
     onProgress?: (percentage: number, loaded?: number, total?: number) => void
   ): Promise<{ asset: MediaAsset; destination: any; message: string }> {
+    const maxRetries = 2;
+    let lastError: Error | null = null;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        return await this.executeXhrUpload(formData, onProgress);
+      } catch (err: any) {
+        lastError = err;
+        console.warn(`[Upload Attempt ${attempt}/${maxRetries} Failed]`, err?.message || err);
+
+        // If connection dropped or server is cold-starting, pause before retrying
+        if (attempt < maxRetries) {
+          await new Promise(r => setTimeout(r, 1200 * attempt));
+        }
+      }
+    }
+
+    // Resilient Fallback: If server proxy failed after retries, directly stream into Google Drive
+    const file = formData.get('file');
+    if (file && typeof file !== 'string') {
+      try {
+        console.info('[Upload] Server endpoint interrupted. Engaging resilient direct Google Drive pipeline...');
+        return await this.uploadViaDirectDriveSession(formData, file as File, onProgress);
+      } catch (fallbackErr: any) {
+        console.error('[Upload] Direct Drive fallback failed:', fallbackErr);
+        throw new Error(fallbackErr.message || lastError?.message || 'Network error during media upload. Check connection.');
+      }
+    }
+
+    throw lastError || new Error('Network error during media upload. Check connection.');
+  }
+
+  private executeXhrUpload(
+    formData: FormData,
+    onProgress?: (percentage: number, loaded?: number, total?: number) => void
+  ): Promise<{ asset: MediaAsset; destination: any; message: string }> {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       xhr.open('POST', `${API_BASE}/media/upload`);
+      xhr.timeout = 300000; // 5 minute per-file timeout for high-res media
 
       const activeUserId = localStorage.getItem('mediaverse_active_user_id');
       if (activeUserId) xhr.setRequestHeader('x-user-id', activeUserId);
@@ -229,12 +266,101 @@ class ApiClient {
             reject(new Error(res.error?.message || `Upload failed with status ${xhr.status}`));
           }
         } catch (e: any) {
-          reject(new Error(e.message || 'Malformed server response'));
+          reject(new Error(e.message || `Malformed server response (${xhr.status})`));
         }
       };
 
-      xhr.onerror = () => reject(new Error('Network error during media upload. Check connection.'));
+      xhr.ontimeout = () => {
+        reject(new Error('Upload connection timed out. Server or network may be busy.'));
+      };
+
+      xhr.onerror = () => {
+        reject(new Error('Network error during media upload. Check connection.'));
+      };
+
       xhr.send(formData);
+    });
+  }
+
+  private async uploadViaDirectDriveSession(
+    formData: FormData,
+    file: File | Blob,
+    onProgress?: (percentage: number, loaded?: number, total?: number) => void
+  ): Promise<{ asset: MediaAsset; destination: any; message: string }> {
+    const filename = (file as File).name || 'upload.jpg';
+    const mimeType = file.type || 'image/jpeg';
+    const fileSizeBytes = file.size;
+
+    const targetFolderId = formData.get('target_folder_id') as string | undefined;
+    const targetFolderPath = formData.get('target_folder_path') as string | undefined;
+    const assignmentId = formData.get('assignment_id') as string | undefined;
+    const eventId = formData.get('event_id') as string | undefined;
+    const mediaType = (formData.get('media_type') as string) || 'RAW_PHOTO';
+    const description = (formData.get('description') as string) || '';
+
+    // 1. Initialize resumable session with Google Drive
+    const session = await this.createUploadSession({
+      filename,
+      fileSizeBytes,
+      mimeType,
+      targetFolderId,
+      targetFolderPath,
+      assignmentId,
+      eventId,
+      mediaType,
+      description
+    });
+
+    if (!session || !session.uploadUrl) {
+      throw new Error('Could not establish Google Drive direct upload session.');
+    }
+
+    // 2. Stream directly to Google Drive via resumable PUT
+    const driveUploadResult = await new Promise<{ id: string; webViewLink?: string; thumbnailLink?: string }>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('PUT', session.uploadUrl);
+      xhr.setRequestHeader('Content-Type', mimeType);
+
+      if (xhr.upload && onProgress) {
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) {
+            const percent = Math.round((e.loaded / e.total) * 100);
+            onProgress(percent, e.loaded, e.total);
+          }
+        };
+      }
+
+      xhr.onload = () => {
+        try {
+          if (xhr.status === 200 || xhr.status === 201) {
+            const data = JSON.parse(xhr.responseText);
+            resolve(data);
+          } else {
+            reject(new Error(`Google Drive returned status ${xhr.status}: ${xhr.responseText}`));
+          }
+        } catch (e: any) {
+          reject(new Error(`Failed to parse Drive response: ${e.message}`));
+        }
+      };
+
+      xhr.onerror = () => reject(new Error('Direct connection to Google Drive interrupted. Check network.'));
+      xhr.send(file);
+    });
+
+    // 3. Register asset metadata in database
+    return await this.completeDirectUpload({
+      driveFileId: driveUploadResult.id,
+      filename,
+      fileSizeBytes,
+      mimeType,
+      driveWebUrl: driveUploadResult.webViewLink,
+      driveThumbnailUrl: driveUploadResult.thumbnailLink,
+      assignmentId,
+      eventId,
+      mediaType,
+      targetFolderId: session.targetFolderId,
+      targetFolderPath: session.targetFolderPath,
+      description
     });
   }
 

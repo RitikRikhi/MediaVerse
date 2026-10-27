@@ -616,17 +616,21 @@ export const DriveSettingsPage: React.FC = () => {
         if (uploadPcDescription) formData.append('description', uploadPcDescription);
         if (uploadPcTags) formData.append('tags', uploadPcTags);
 
-        const res = await api.uploadMediaFile(formData, (percent) => {
-          setUploadPcCurrentProgress(percent);
-          const overall = Math.round(((i + (percent / 100)) / totalFiles) * 100);
-          setUploadPcOverallProgress(overall);
-        });
+        try {
+          const res = await api.uploadMediaFile(formData, (percent) => {
+            setUploadPcCurrentProgress(percent);
+            const overall = Math.round(((i + (percent / 100)) / totalFiles) * 100);
+            setUploadPcOverallProgress(overall);
+          });
 
-        uploadedResults.push({
-          name: currentFile.name,
-          url: res.asset?.drive_web_url || '',
-          folder: uploadPcTargetFolderPath || 'Target Folder'
-        });
+          uploadedResults.push({
+            name: currentFile.name,
+            url: res.asset?.drive_web_url || '',
+            folder: uploadPcTargetFolderPath || 'Target Folder'
+          });
+        } catch (fileErr: any) {
+          console.warn(`[Drive Studio PC Upload Error] File "${currentFile.name}" failed:`, fileErr);
+        }
       }
 
       setUploadPcOverallProgress(100);
