@@ -10,7 +10,7 @@
     "drivePath": "/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Rohan Singh (PHOTOGRAPHER)",
     "sharedWithEmail": "photographer@dsa.cgc.edu.in",
     "createdAt": "2026-09-01T10:00:00.000Z",
-    "updatedAt": "2026-10-27T05:57:43.652Z",
+    "updatedAt": "2026-10-27T07:15:55.340Z",
     "subfolders": [
       {
         "id": "sub-92142a70",
@@ -74,6 +74,17 @@
         "driveWebUrl": "https://drive.google.com/drive/folders/1tFGNR9WZo_9dGgf_6zBOHdBnpPRxBQXQ",
         "isDefault": true,
         "created_at": "2026-10-27T05:57:43.652Z"
+      }
+    ],
+    "accessLevel": "writer",
+    "grantedPermissions": [
+      {
+        "id": "perm-b8c8d586",
+        "email": "lead.editor@dsa.cgc.edu.in",
+        "name": "Lead Editor Rahul",
+        "role": "writer",
+        "grantedBy": "Prof. Rajesh Sharma",
+        "grantedAt": "2026-10-27T07:15:51.208Z"
       }
     ]
   },
@@ -153,7 +164,9 @@
         "isDefault": true,
         "created_at": "2026-10-27T05:57:43.653Z"
       }
-    ]
+    ],
+    "accessLevel": "writer",
+    "grantedPermissions": []
   },
   {
     "id": "member-drive-simran-editor",
@@ -213,6 +226,153 @@
         "isDefault": true,
         "created_at": "2026-10-27T05:57:43.653Z"
       }
-    ]
+    ],
+    "accessLevel": "writer",
+    "grantedPermissions": []
+  },
+  {
+    "id": "member-test-user-karan-photo-01",
+    "memberEmail": "karan.photo@dsa.cgc.edu.in",
+    "memberName": "Karan Mehra",
+    "role": "PHOTOGRAPHER",
+    "specializationLabel": "Photography (RAW Photos & Stills Only)",
+    "driveFolderId": "1RAeyZimH9GDEP6v1C8cF6hnrcCCAsCKu",
+    "driveWebUrl": "https://drive.google.com/drive/folders/1RAeyZimH9GDEP6v1C8cF6hnrcCCAsCKu",
+    "drivePath": "/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Karan Mehra (PHOTOGRAPHER)",
+    "sharedWithEmail": "karan.photo@dsa.cgc.edu.in",
+    "accessLevel": "writer",
+    "grantedPermissions": [],
+    "createdAt": "2026-10-27T07:15:48.094Z",
+    "updatedAt": "2026-10-27T07:15:48.094Z",
+    "subfolders": [
+      {
+        "id": "fb240ea5-2f18-433a-a565-0a0dea5586ba",
+        "name": "01 - Day 1 Morning Keynotes & Lamp Lighting (RAW Photos)",
+        "path": "/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Karan Mehra (PHOTOGRAPHER)/01 - Day 1 Morning Keynotes & Lamp Lighting (RAW Photos)",
+        "driveFolderId": "1jxOjL9_rJmNVBNzspQKh2GKo7_RETtlq",
+        "driveWebUrl": "https://drive.google.com/drive/folders/1jxOjL9_rJmNVBNzspQKh2GKo7_RETtlq",
+        "isDefault": true,
+        "created_at": "2026-10-27T07:15:32.014Z"
+      },
+      {
+        "id": "86b27d14-4a79-4ef3-9444-6dbaa02ad685",
+        "name": "02 - Day 1 Stage, Dignitaries & VIP Portraits",
+        "path": "/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Karan Mehra (PHOTOGRAPHER)/02 - Day 1 Stage, Dignitaries & VIP Portraits",
+        "driveFolderId": "1ZXzM_FZeID1jmuvd4s2sgRZI2hxjsjXr",
+        "driveWebUrl": "https://drive.google.com/drive/folders/1ZXzM_FZeID1jmuvd4s2sgRZI2hxjsjXr",
+        "isDefault": true,
+        "created_at": "2026-10-27T07:15:34.711Z"
+      },
+      {
+        "id": "3bfa4213-2099-48af-afc5-4841c4c83fb9",
+        "name": "03 - Day 1 Crowd Reactions, Stalls & Atmosphere",
+        "path": "/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Karan Mehra (PHOTOGRAPHER)/03 - Day 1 Crowd Reactions, Stalls & Atmosphere",
+        "driveFolderId": "1EzwvwbRoGLvtozzH2kzfLIDO2aC1Cx6e",
+        "driveWebUrl": "https://drive.google.com/drive/folders/1EzwvwbRoGLvtozzH2kzfLIDO2aC1Cx6e",
+        "isDefault": true,
+        "created_at": "2026-10-27T07:15:36.884Z"
+      },
+      {
+        "id": "f1fc501e-9197-4d4f-b059-cfb4a1204343",
+        "name": "04 - Day 1 Evening Rock Concert (Action & Stills)",
+        "path": "/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Karan Mehra (PHOTOGRAPHER)/04 - Day 1 Evening Rock Concert (Action & Stills)",
+        "driveFolderId": "1qh_nN1N-zcy4yu2Ba2iSe8AWT0PYewgL",
+        "driveWebUrl": "https://drive.google.com/drive/folders/1qh_nN1N-zcy4yu2Ba2iSe8AWT0PYewgL",
+        "isDefault": true,
+        "created_at": "2026-10-27T07:15:38.831Z"
+      },
+      {
+        "id": "e5f8371d-56d1-49f1-bce8-e457f06ebc6a",
+        "name": "05 - Day 2 Tech Arena, Robotics & Hackathon (RAW)",
+        "path": "/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Karan Mehra (PHOTOGRAPHER)/05 - Day 2 Tech Arena, Robotics & Hackathon (RAW)",
+        "driveFolderId": "1EkkGh3f-SKYx5xrKruGsr1YnIs0V3gRc",
+        "driveWebUrl": "https://drive.google.com/drive/folders/1EkkGh3f-SKYx5xrKruGsr1YnIs0V3gRc",
+        "isDefault": true,
+        "created_at": "2026-10-27T07:15:40.924Z"
+      },
+      {
+        "id": "e682a53f-bfae-4a99-b441-44684faa68b3",
+        "name": "06 - Day 2 Valedictory, Trophies & Prize Distribution",
+        "path": "/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Karan Mehra (PHOTOGRAPHER)/06 - Day 2 Valedictory, Trophies & Prize Distribution",
+        "driveFolderId": "1kxkY4CimYjI1kSVQ6ghlFsFNFHtCL3Vs",
+        "driveWebUrl": "https://drive.google.com/drive/folders/1kxkY4CimYjI1kSVQ6ghlFsFNFHtCL3Vs",
+        "isDefault": true,
+        "created_at": "2026-10-27T07:15:43.175Z"
+      },
+      {
+        "id": "175586df-8bf8-4ee9-b7eb-b8536b906a10",
+        "name": "07 - High-Res Master Selects & Color Graded JPGs",
+        "path": "/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Karan Mehra (PHOTOGRAPHER)/07 - High-Res Master Selects & Color Graded JPGs",
+        "driveFolderId": "1vRYfQkfRpecn_NDqMEOFRjTHskHPHwfx",
+        "driveWebUrl": "https://drive.google.com/drive/folders/1vRYfQkfRpecn_NDqMEOFRjTHskHPHwfx",
+        "isDefault": true,
+        "created_at": "2026-10-27T07:15:46.470Z"
+      }
+    ],
+    "tree": {
+      "id": "f6555b73-a7dd-47ee-a28e-2ceeffa146c1",
+      "name": "Karan Mehra (PHOTOGRAPHER)",
+      "path": "/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Karan Mehra (PHOTOGRAPHER)",
+      "driveFolderId": "1RAeyZimH9GDEP6v1C8cF6hnrcCCAsCKu",
+      "driveWebUrl": "https://drive.google.com/drive/folders/1RAeyZimH9GDEP6v1C8cF6hnrcCCAsCKu",
+      "children": [
+        {
+          "id": "fb240ea5-2f18-433a-a565-0a0dea5586ba",
+          "name": "01 - Day 1 Morning Keynotes & Lamp Lighting (RAW Photos)",
+          "path": "/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Karan Mehra (PHOTOGRAPHER)/01 - Day 1 Morning Keynotes & Lamp Lighting (RAW Photos)",
+          "driveFolderId": "1jxOjL9_rJmNVBNzspQKh2GKo7_RETtlq",
+          "driveWebUrl": "https://drive.google.com/drive/folders/1jxOjL9_rJmNVBNzspQKh2GKo7_RETtlq",
+          "children": []
+        },
+        {
+          "id": "86b27d14-4a79-4ef3-9444-6dbaa02ad685",
+          "name": "02 - Day 1 Stage, Dignitaries & VIP Portraits",
+          "path": "/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Karan Mehra (PHOTOGRAPHER)/02 - Day 1 Stage, Dignitaries & VIP Portraits",
+          "driveFolderId": "1ZXzM_FZeID1jmuvd4s2sgRZI2hxjsjXr",
+          "driveWebUrl": "https://drive.google.com/drive/folders/1ZXzM_FZeID1jmuvd4s2sgRZI2hxjsjXr",
+          "children": []
+        },
+        {
+          "id": "3bfa4213-2099-48af-afc5-4841c4c83fb9",
+          "name": "03 - Day 1 Crowd Reactions, Stalls & Atmosphere",
+          "path": "/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Karan Mehra (PHOTOGRAPHER)/03 - Day 1 Crowd Reactions, Stalls & Atmosphere",
+          "driveFolderId": "1EzwvwbRoGLvtozzH2kzfLIDO2aC1Cx6e",
+          "driveWebUrl": "https://drive.google.com/drive/folders/1EzwvwbRoGLvtozzH2kzfLIDO2aC1Cx6e",
+          "children": []
+        },
+        {
+          "id": "f1fc501e-9197-4d4f-b059-cfb4a1204343",
+          "name": "04 - Day 1 Evening Rock Concert (Action & Stills)",
+          "path": "/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Karan Mehra (PHOTOGRAPHER)/04 - Day 1 Evening Rock Concert (Action & Stills)",
+          "driveFolderId": "1qh_nN1N-zcy4yu2Ba2iSe8AWT0PYewgL",
+          "driveWebUrl": "https://drive.google.com/drive/folders/1qh_nN1N-zcy4yu2Ba2iSe8AWT0PYewgL",
+          "children": []
+        },
+        {
+          "id": "e5f8371d-56d1-49f1-bce8-e457f06ebc6a",
+          "name": "05 - Day 2 Tech Arena, Robotics & Hackathon (RAW)",
+          "path": "/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Karan Mehra (PHOTOGRAPHER)/05 - Day 2 Tech Arena, Robotics & Hackathon (RAW)",
+          "driveFolderId": "1EkkGh3f-SKYx5xrKruGsr1YnIs0V3gRc",
+          "driveWebUrl": "https://drive.google.com/drive/folders/1EkkGh3f-SKYx5xrKruGsr1YnIs0V3gRc",
+          "children": []
+        },
+        {
+          "id": "e682a53f-bfae-4a99-b441-44684faa68b3",
+          "name": "06 - Day 2 Valedictory, Trophies & Prize Distribution",
+          "path": "/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Karan Mehra (PHOTOGRAPHER)/06 - Day 2 Valedictory, Trophies & Prize Distribution",
+          "driveFolderId": "1kxkY4CimYjI1kSVQ6ghlFsFNFHtCL3Vs",
+          "driveWebUrl": "https://drive.google.com/drive/folders/1kxkY4CimYjI1kSVQ6ghlFsFNFHtCL3Vs",
+          "children": []
+        },
+        {
+          "id": "175586df-8bf8-4ee9-b7eb-b8536b906a10",
+          "name": "07 - High-Res Master Selects & Color Graded JPGs",
+          "path": "/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Karan Mehra (PHOTOGRAPHER)/07 - High-Res Master Selects & Color Graded JPGs",
+          "driveFolderId": "1vRYfQkfRpecn_NDqMEOFRjTHskHPHwfx",
+          "driveWebUrl": "https://drive.google.com/drive/folders/1vRYfQkfRpecn_NDqMEOFRjTHskHPHwfx",
+          "children": []
+        }
+      ]
+    }
   }
 ]

@@ -61,6 +61,10 @@ class ApiClient {
     return this.request<UserProfile[]>('/auth/users');
   }
 
+  async getUsers(): Promise<UserProfile[]> {
+    return this.getAllUsers();
+  }
+
   async login(credentials: { email: string; password?: string }): Promise<{ user: UserProfile; token: string }> {
     const data = await this.request<{ user: UserProfile; token: string }>('/auth/login', {
       method: 'POST',
@@ -495,6 +499,7 @@ class ApiClient {
     memberName: string;
     role: UserRole | 'VLOGGER';
     customSubfolders?: string[];
+    accessLevel?: 'reader' | 'writer';
   }): Promise<MemberDrive> {
     return this.request<MemberDrive>('/drive/member-drives', {
       method: 'POST',
@@ -504,6 +509,36 @@ class ApiClient {
 
   async getMemberDrive(id: string): Promise<MemberDrive> {
     return this.request<MemberDrive>(`/drive/member-drives/${id}`);
+  }
+
+  async grantDriveAccess(
+    driveId: string,
+    payload: { email: string; name?: string; role: 'reader' | 'writer' }
+  ): Promise<MemberDrive> {
+    return this.request<MemberDrive>(`/drive/member-drives/${driveId}/permissions`, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async updateDriveAccessLevel(
+    driveId: string,
+    accessLevel: 'reader' | 'writer'
+  ): Promise<MemberDrive> {
+    return this.request<MemberDrive>(`/drive/member-drives/${driveId}/access-level`, {
+      method: 'PATCH',
+      body: JSON.stringify({ accessLevel })
+    });
+  }
+
+  async revokeDriveAccess(
+    driveId: string,
+    email: string
+  ): Promise<MemberDrive> {
+    return this.request<MemberDrive>(`/drive/member-drives/${driveId}/permissions`, {
+      method: 'DELETE',
+      body: JSON.stringify({ email })
+    });
   }
 
   async addMemberDriveSubfolder(

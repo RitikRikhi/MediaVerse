@@ -1,6 +1,6 @@
 import { config } from '../config';
 import { db } from '../db/memoryStore';
-import { MediaFolder, PersonalDriveInfo, PersonalSubfolder, UserRole, MemberDrive } from '@mediaverse/shared-types';
+import { MediaFolder, PersonalDriveInfo, PersonalSubfolder, UserRole, MemberDrive, DriveGrantedPermission } from '@mediaverse/shared-types';
 import { SupabaseService } from './supabaseService';
 import crypto from 'crypto';
 import fs from 'fs';
@@ -1717,12 +1717,18 @@ export class DriveService {
   // Personal User Drives & Role Hierarchy
   // ==========================================
 
-  static async shareFolderWithUser(folderId: string, email: string): Promise<boolean> {
+  static async shareFolderWithUser(
+    folderId: string,
+    email: string,
+    role: 'reader' | 'writer' = 'writer'
+  ): Promise<{ success: boolean; permissionId?: string }> {
     const cleanEmail = (email || '').trim().toLowerCase();
-    if (!cleanEmail || !cleanEmail.includes('@')) return false;
+    if (!cleanEmail || !cleanEmail.includes('@')) return { success: false };
 
     const token = await this.getValidAccessToken();
-    if (!token || folderId.startsWith('user-drive-') || folderId.startsWith('sub-')) return false;
+    if (!token || folderId.startsWith('user-drive-') || folderId.startsWith('member-drive-') || folderId.startsWith('sub-')) {
+      return { success: true, permissionId: `mock-perm-${crypto.randomUUID().slice(0, 8)}` };
+    }
 
     try {
       const res = await fetch(`https://www.googleapis.com/drive/v3/files/${folderId}/permissions?sendNotificationEmail=true&supportsAllDrives=true`, {
@@ -1732,22 +1738,119 @@ export class DriveService {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          role: 'writer',
+          role,
           type: 'user',
           emailAddress: cleanEmail
         })
       });
 
       if (res.ok) {
-        console.log(`[DriveService] Successfully shared Google Drive folder ${folderId} with ${cleanEmail} (role: writer)`);
-        return true;
+        const data = await res.json().catch(() => ({}));
+        console.log(`[DriveService] Successfully shared Google Drive folder ${folderId} with ${cleanEmail} (role: ${role}, id: ${data.id})`);
+        return { success: true, permissionId: data.id };
       } else {
         const errData = await res.json().catch(() => ({}));
         console.warn(`[DriveService] Drive permission share warning for ${cleanEmail}:`, JSON.stringify(errData));
-        return false;
+        return { success: false };
       }
     } catch (err: any) {
       console.warn(`[DriveService] Error sharing folder with ${cleanEmail}:`, err.message);
+      return { success: false };
+    }
+  }
+
+  static async updateFolderPermission(
+    folderId: string,
+    email: string,
+    newRole: 'reader' | 'writer'
+  ): Promise<boolean> {
+    const cleanEmail = (email || '').trim().toLowerCase();
+    if (!cleanEmail || !cleanEmail.includes('@')) return false;
+
+    const token = await this.getValidAccessToken();
+    if (!token || folderId.startsWith('user-drive-') || folderId.startsWith('member-drive-') || folderId.startsWith('sub-')) {
+      return true;
+    }
+
+    try {
+      const listRes = await fetch(
+        `https://www.googleapis.com/drive/v3/files/${folderId}/permissions?fields=permissions(id,emailAddress,role)&supportsAllDrives=true`,
+        {
+          headers: { Authorization: `Bearer ${token}` }
+        }
+      );
+
+      if (listRes.ok) {
+        const data = await listRes.json();
+        const found = (data.permissions || []).find((p: any) => p.emailAddress?.toLowerCase() === cleanEmail);
+        if (found && found.id) {
+          const patchRes = await fetch(
+            `https://www.googleapis.com/drive/v3/files/${folderId}/permissions/${found.id}?supportsAllDrives=true`,
+            {
+              method: 'PATCH',
+              headers: {
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({ role: newRole })
+            }
+          );
+          if (patchRes.ok) {
+            console.log(`[DriveService] Updated permission on folder ${folderId} for ${cleanEmail} to "${newRole}".`);
+            return true;
+          }
+        }
+      }
+
+      // If existing permission was not found in listing, create it
+      const shareRes = await this.shareFolderWithUser(folderId, cleanEmail, newRole);
+      return shareRes.success;
+    } catch (err: any) {
+      console.warn(`[DriveService] Update permission warning for ${cleanEmail}:`, err.message);
+      return false;
+    }
+  }
+
+  static async removeFolderPermission(
+    folderId: string,
+    permissionId?: string,
+    email?: string
+  ): Promise<boolean> {
+    const token = await this.getValidAccessToken();
+    if (!token || folderId.startsWith('user-drive-') || folderId.startsWith('member-drive-') || folderId.startsWith('sub-')) {
+      return true;
+    }
+
+    try {
+      let targetId = permissionId;
+      if (!targetId && email) {
+        const cleanEmail = email.trim().toLowerCase();
+        const listRes = await fetch(
+          `https://www.googleapis.com/drive/v3/files/${folderId}/permissions?fields=permissions(id,emailAddress,role)&supportsAllDrives=true`,
+          {
+            headers: { Authorization: `Bearer ${token}` }
+          }
+        );
+        if (listRes.ok) {
+          const data = await listRes.json();
+          const found = (data.permissions || []).find((p: any) => p.emailAddress?.toLowerCase() === cleanEmail);
+          if (found) targetId = found.id;
+        }
+      }
+
+      if (targetId && !targetId.startsWith('mock-perm-')) {
+        const delRes = await fetch(
+          `https://www.googleapis.com/drive/v3/files/${folderId}/permissions/${targetId}?supportsAllDrives=true`,
+          {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${token}` }
+          }
+        );
+        return delRes.ok;
+      }
+      return true;
+    } catch (err: any) {
+      console.warn(`[DriveService] Remove permission warning:`, err.message);
       return false;
     }
   }
@@ -1836,6 +1939,20 @@ export class DriveService {
 
       if (user.email && user.email.includes('@') && !existingPersonalRoot.drive_folder_id.startsWith('user-drive-')) {
         this.shareFolderWithUser(existingPersonalRoot.drive_folder_id, user.email).catch(() => {});
+      }
+
+      if (user.email) {
+        this.syncUserIntoMemberDrives({
+          id: user.id,
+          email: user.email,
+          full_name: user.full_name,
+          role,
+          driveFolderId: existingPersonalRoot.drive_folder_id,
+          driveWebUrl: existingPersonalRoot.drive_web_url,
+          drivePath: existingPersonalRoot.folder_path,
+          subfolders: subList,
+          tree: personalTree
+        });
       }
 
       return {
@@ -1964,7 +2081,21 @@ export class DriveService {
     let sharedWithEmail: string | undefined = undefined;
     if (userEmail && userEmail.includes('@') && !userDriveFolderId.startsWith('user-drive-')) {
       const shared = await this.shareFolderWithUser(userDriveFolderId, userEmail);
-      if (shared) sharedWithEmail = userEmail;
+      if (shared && shared.success) sharedWithEmail = userEmail;
+    }
+
+    if (userEmail) {
+      this.syncUserIntoMemberDrives({
+        id: user.id,
+        email: userEmail,
+        full_name: user.full_name,
+        role,
+        driveFolderId: userDriveFolderId,
+        driveWebUrl: personalRootRecord.drive_web_url,
+        drivePath: personalRootPath,
+        subfolders,
+        tree: personalTree
+      });
     }
 
     console.log(`[DriveService] Successfully provisioned personal drive for ${user.full_name} (${role}) with ${subfolders.length} subfolders.`);
@@ -2130,7 +2261,21 @@ export class DriveService {
     let sharedWithEmail: string | undefined = undefined;
     if (targetEmail && targetEmail.includes('@') && !userDriveFolderId.startsWith('user-drive-')) {
       const shared = await this.shareFolderWithUser(userDriveFolderId, targetEmail);
-      if (shared) sharedWithEmail = targetEmail;
+      if (shared && shared.success) sharedWithEmail = targetEmail;
+    }
+
+    if (targetEmail) {
+      this.syncUserIntoMemberDrives({
+        id: user.id,
+        email: targetEmail,
+        full_name: user.full_name,
+        role,
+        driveFolderId: userDriveFolderId,
+        driveWebUrl: personalRootRecord.drive_web_url,
+        drivePath: personalRootPath,
+        subfolders,
+        tree: personalTree
+      });
     }
 
     console.log(`[DriveService] Reconfigured personal drive for ${user.full_name} (${role}) in mode ${options.structureMode} with ${subfolders.length} subfolders. (Shared with: ${sharedWithEmail || 'none'})`);
@@ -2302,12 +2447,79 @@ export class DriveService {
   // Super Admin Member Gmail-Wise Drives Management
   // ========================================================
 
+  static syncUserIntoMemberDrives(data: {
+    id: string;
+    email: string;
+    full_name: string;
+    role: UserRole | 'VLOGGER';
+    driveFolderId: string;
+    driveWebUrl: string;
+    drivePath: string;
+    subfolders: PersonalSubfolder[];
+    tree: FolderNode;
+  }): void {
+    const cleanEmail = (data.email || '').trim().toLowerCase();
+    if (!cleanEmail) return;
+
+    const existingIndex = this.memberDrives.findIndex(m => m.memberEmail.toLowerCase() === cleanEmail);
+    const specializationLabel = data.role === 'PHOTOGRAPHER'
+      ? 'Photography (RAW Photos & Stills Only)'
+      : data.role === 'VIDEOGRAPHER' || (data.role as string) === 'VLOGGER'
+      ? 'Videography & Vlogging (4K Footage & BTS)'
+      : data.role === 'VIDEO_EDITOR'
+      ? 'Video Editing & Deliverables'
+      : `${data.role} Drive`;
+
+    if (existingIndex >= 0) {
+      const existing = this.memberDrives[existingIndex];
+      this.memberDrives[existingIndex] = {
+        ...existing,
+        memberName: data.full_name || existing.memberName,
+        role: data.role || existing.role,
+        specializationLabel,
+        driveFolderId: data.driveFolderId || existing.driveFolderId,
+        driveWebUrl: data.driveWebUrl || existing.driveWebUrl,
+        drivePath: data.drivePath || existing.drivePath,
+        subfolders: data.subfolders && data.subfolders.length > 0 ? data.subfolders : existing.subfolders,
+        tree: data.tree || existing.tree,
+        accessLevel: existing.accessLevel || 'writer',
+        grantedPermissions: existing.grantedPermissions || [],
+        updatedAt: new Date().toISOString()
+      };
+    } else {
+      const newDrive: MemberDrive = {
+        id: `member-${data.id || crypto.randomUUID()}`,
+        memberEmail: cleanEmail,
+        memberName: data.full_name,
+        role: data.role,
+        specializationLabel,
+        driveFolderId: data.driveFolderId,
+        driveWebUrl: data.driveWebUrl,
+        drivePath: data.drivePath,
+        sharedWithEmail: cleanEmail,
+        accessLevel: 'writer',
+        grantedPermissions: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        subfolders: data.subfolders,
+        tree: data.tree
+      };
+      this.memberDrives.push(newDrive);
+    }
+    this.saveMemberDrivesToDisk();
+  }
+
   static loadMemberDrivesFromDisk(): void {
     const filePath = resolveMemberFilePath();
     try {
       if (fs.existsSync(filePath)) {
         const raw = fs.readFileSync(filePath, 'utf-8');
-        this.memberDrives = JSON.parse(raw);
+        const parsed: any[] = JSON.parse(raw);
+        this.memberDrives = parsed.map(m => ({
+          ...m,
+          accessLevel: m.accessLevel || 'writer',
+          grantedPermissions: m.grantedPermissions || []
+        }));
         console.log(`[DriveService] Loaded ${this.memberDrives.length} member drives from disk.`);
         return;
       }
@@ -2327,6 +2539,8 @@ export class DriveService {
         driveWebUrl: 'https://drive.google.com/drive/folders/1tFGNR9WZo_9dGgf_6zBOHdBnpPRxBQXQ',
         drivePath: '/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Rohan Singh (PHOTOGRAPHER)',
         sharedWithEmail: 'photographer@dsa.cgc.edu.in',
+        accessLevel: 'writer',
+        grantedPermissions: [],
         createdAt: new Date('2026-09-01T10:00:00Z').toISOString(),
         updatedAt: new Date().toISOString(),
         subfolders: this.getPersonalDriveTemplates('PHOTOGRAPHER').map(name => ({
@@ -2349,6 +2563,8 @@ export class DriveService {
         driveWebUrl: 'https://drive.google.com/drive/folders/1m7U0n1wuICACLVBmKl8YYLqEXvmVALWQ',
         drivePath: '/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Vikram Malhotra (VIDEOGRAPHER)',
         sharedWithEmail: 'videographer@dsa.cgc.edu.in',
+        accessLevel: 'writer',
+        grantedPermissions: [],
         createdAt: new Date('2026-09-01T10:00:00Z').toISOString(),
         updatedAt: new Date().toISOString(),
         subfolders: this.getPersonalDriveTemplates('VIDEOGRAPHER').map(name => ({
@@ -2371,6 +2587,8 @@ export class DriveService {
         driveWebUrl: 'https://drive.google.com/drive/folders/1Mgc1jPrW1OnjXCWh24ExtC7Selj5v0kb',
         drivePath: '/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Simran Kaur (VIDEO_EDITOR)',
         sharedWithEmail: 'editor@dsa.cgc.edu.in',
+        accessLevel: 'writer',
+        grantedPermissions: [],
         createdAt: new Date('2026-09-01T10:00:00Z').toISOString(),
         updatedAt: new Date().toISOString(),
         subfolders: this.getPersonalDriveTemplates('VIDEO_EDITOR').map(name => ({
@@ -2415,6 +2633,7 @@ export class DriveService {
     memberName: string;
     role: UserRole | 'VLOGGER';
     customSubfolders?: string[];
+    accessLevel?: 'reader' | 'writer';
   }): Promise<MemberDrive> {
     const cleanEmail = (options.memberEmail || '').trim().toLowerCase();
     const cleanName = (options.memberName || '').trim();
@@ -2427,6 +2646,7 @@ export class DriveService {
     }
 
     const role = options.role || 'PHOTOGRAPHER';
+    const accessLevel = options.accessLevel || 'writer';
     const rootId = config.google.rootFolderId || '1PNvblS0BffXR12av3dC7fP7wNdf948kO';
     const parentContainerName = 'Crew Personal Drives';
 
@@ -2462,11 +2682,11 @@ export class DriveService {
     const drivePath = `/DSA MEDIAVERSE SAVISKAR 26/${parentContainerName}/${userFolderName}`;
     const driveWebUrl = `https://drive.google.com/drive/folders/${userDriveFolderId}`;
 
-    // 3. Share with Gmail as Editor (writer)
+    // 3. Share with Gmail with specified access level (Download Only or Full Editor)
     let sharedWithEmail = cleanEmail;
     if (!userDriveFolderId.startsWith('member-drive-')) {
       try {
-        await this.shareFolderWithUser(userDriveFolderId, cleanEmail);
+        await this.shareFolderWithUser(userDriveFolderId, cleanEmail, accessLevel);
       } catch (err: any) {
         console.warn(`[DriveService] Sharing invitation warning: ${err.message}`);
       }
@@ -2552,6 +2772,8 @@ export class DriveService {
       driveWebUrl,
       drivePath,
       sharedWithEmail,
+      accessLevel,
+      grantedPermissions: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       subfolders,
@@ -2561,9 +2783,110 @@ export class DriveService {
     this.memberDrives.push(newDrive);
     this.saveMemberDrivesToDisk();
 
-    console.log(`[DriveService] Created Super Admin member drive for ${cleanEmail} (${cleanName}, ${role}) with ${subfolders.length} subfolders.`);
+    console.log(`[DriveService] Created Super Admin member drive for ${cleanEmail} (${cleanName}, ${role}) with ${subfolders.length} subfolders. Access: ${accessLevel}`);
 
     return newDrive;
+  }
+
+  // ========================================================
+  // Super Admin & Admin Drive Permission Delegation
+  // ========================================================
+
+  static async grantDriveAccessToUser(params: {
+    driveId: string;
+    targetEmail: string;
+    targetName?: string;
+    role: 'reader' | 'writer';
+    adminUser: { id: string; full_name: string };
+  }): Promise<MemberDrive> {
+    const drive = this.getMemberDriveById(params.driveId);
+    if (!drive) {
+      throw new Error(`Member drive with ID "${params.driveId}" not found.`);
+    }
+
+    const cleanEmail = (params.targetEmail || '').trim().toLowerCase();
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      throw new Error('Valid target Gmail address is required (e.g., coordinator@gmail.com).');
+    }
+
+    // Call Google Drive API to share folder with chosen permission
+    const shareRes = await this.shareFolderWithUser(drive.driveFolderId, cleanEmail, params.role);
+
+    if (!drive.grantedPermissions) {
+      drive.grantedPermissions = [];
+    }
+
+    const existingIndex = drive.grantedPermissions.findIndex(p => p.email.toLowerCase() === cleanEmail);
+    const permissionEntry: DriveGrantedPermission = {
+      id: shareRes.permissionId || `perm-${crypto.randomUUID().slice(0, 8)}`,
+      email: cleanEmail,
+      name: (params.targetName || '').trim() || cleanEmail.split('@')[0],
+      role: params.role,
+      grantedBy: params.adminUser.full_name,
+      grantedAt: new Date().toISOString()
+    };
+
+    if (existingIndex >= 0) {
+      drive.grantedPermissions[existingIndex] = permissionEntry;
+    } else {
+      drive.grantedPermissions.push(permissionEntry);
+    }
+
+    drive.updatedAt = new Date().toISOString();
+    this.saveMemberDrivesToDisk();
+
+    console.log(`[DriveService] Super Admin ${params.adminUser.full_name} granted ${params.role.toUpperCase()} access on ${drive.memberName}'s drive to ${cleanEmail}.`);
+    return drive;
+  }
+
+  static async updateMemberDriveAccessLevel(params: {
+    driveId: string;
+    newAccessLevel: 'reader' | 'writer';
+    adminUser: { id: string; full_name: string };
+  }): Promise<MemberDrive> {
+    const drive = this.getMemberDriveById(params.driveId);
+    if (!drive) {
+      throw new Error(`Member drive with ID "${params.driveId}" not found.`);
+    }
+
+    drive.accessLevel = params.newAccessLevel;
+    drive.updatedAt = new Date().toISOString();
+
+    // Update in Google Drive API if folder is live
+    if (drive.memberEmail) {
+      await this.updateFolderPermission(drive.driveFolderId, drive.memberEmail, params.newAccessLevel);
+    }
+
+    this.saveMemberDrivesToDisk();
+    console.log(`[DriveService] Super Admin ${params.adminUser.full_name} updated primary access level of ${drive.memberName}'s drive to "${params.newAccessLevel}".`);
+    return drive;
+  }
+
+  static async revokeDriveAccessFromUser(params: {
+    driveId: string;
+    targetEmail: string;
+    adminUser: { id: string; full_name: string };
+  }): Promise<MemberDrive> {
+    const drive = this.getMemberDriveById(params.driveId);
+    if (!drive) {
+      throw new Error(`Member drive with ID "${params.driveId}" not found.`);
+    }
+
+    const cleanEmail = (params.targetEmail || '').trim().toLowerCase();
+    if (!drive.grantedPermissions) {
+      drive.grantedPermissions = [];
+    }
+
+    const targetPerm = drive.grantedPermissions.find(p => p.email.toLowerCase() === cleanEmail);
+    if (targetPerm) {
+      await this.removeFolderPermission(drive.driveFolderId, targetPerm.id, cleanEmail);
+      drive.grantedPermissions = drive.grantedPermissions.filter(p => p.email.toLowerCase() !== cleanEmail);
+    }
+
+    drive.updatedAt = new Date().toISOString();
+    this.saveMemberDrivesToDisk();
+    console.log(`[DriveService] Super Admin ${params.adminUser.full_name} revoked access for ${cleanEmail} from ${drive.memberName}'s drive.`);
+    return drive;
   }
 
   static async addMemberDriveSubfolder(

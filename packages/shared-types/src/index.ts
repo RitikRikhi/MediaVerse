@@ -233,6 +233,15 @@ export interface PersonalDriveInfo {
   subfolders: PersonalSubfolder[];
 }
 
+export interface DriveGrantedPermission {
+  id?: string;
+  email: string;
+  name?: string;
+  role: 'reader' | 'writer'; // 'reader' = Download / View Only, 'writer' = Editor
+  grantedBy: string;
+  grantedAt: string;
+}
+
 export interface MemberDrive {
   id: string;
   memberEmail: string;
@@ -243,6 +252,8 @@ export interface MemberDrive {
   driveWebUrl: string;
   drivePath: string;
   sharedWithEmail: string;
+  accessLevel: 'reader' | 'writer'; // Primary access: 'reader' = Download Only, 'writer' = Editor
+  grantedPermissions?: DriveGrantedPermission[];
   createdAt: string;
   updatedAt: string;
   subfolders: PersonalSubfolder[];

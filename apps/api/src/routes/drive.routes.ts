@@ -494,7 +494,7 @@ driveRouter.delete('/my-drive/folders/:folderId', authMiddleware, async (req: Au
 // ==========================================
 
 // 1. List all member drives (Super Admin / Coordinator)
-driveRouter.get('/member-drives', authMiddleware, async (_req: AuthenticatedRequest, res: Response) => {
+driveRouter.get('/member-drives', authMiddleware, requireRoles('SUPER_ADMIN', 'MEDIA_COORDINATOR', 'PRESIDENT'), async (_req: AuthenticatedRequest, res: Response) => {
   try {
     const list = DriveService.getAllMemberDrives();
     res.json({
@@ -511,7 +511,7 @@ driveRouter.get('/member-drives', authMiddleware, async (_req: AuthenticatedRequ
 
 // 2. Create drive for any member Gmail (Super Admin / Coordinator)
 driveRouter.post('/member-drives', authMiddleware, requireRoles('SUPER_ADMIN', 'MEDIA_COORDINATOR', 'PRESIDENT'), async (req: AuthenticatedRequest, res: Response) => {
-  const { memberEmail, memberName, role, customSubfolders } = req.body;
+  const { memberEmail, memberName, role, customSubfolders, accessLevel } = req.body;
 
   if (!memberEmail || !memberName) {
     return res.status(400).json({
@@ -526,7 +526,8 @@ driveRouter.post('/member-drives', authMiddleware, requireRoles('SUPER_ADMIN', '
       memberEmail,
       memberName,
       role: role || 'PHOTOGRAPHER',
-      customSubfolders
+      customSubfolders,
+      accessLevel
     });
 
     AuditService.log({
@@ -558,7 +559,7 @@ driveRouter.post('/member-drives', authMiddleware, requireRoles('SUPER_ADMIN', '
 });
 
 // 3. Get single member drive details
-driveRouter.get('/member-drives/:id', authMiddleware, (req: AuthenticatedRequest, res: Response) => {
+driveRouter.get('/member-drives/:id', authMiddleware, requireRoles('SUPER_ADMIN', 'MEDIA_COORDINATOR', 'PRESIDENT'), (req: AuthenticatedRequest, res: Response) => {
   const drive = DriveService.getMemberDriveById(req.params.id);
   if (!drive) {
     return res.status(404).json({
@@ -642,6 +643,138 @@ driveRouter.delete('/member-drives/:id/folders/:folderId', authMiddleware, requi
     res.json({ success: true, data: result });
   } catch (err: any) {
     res.status(400).json({ success: false, error: { message: err.message } });
+  }
+});
+
+// 7. Grant access / permission on a member's drive to another user (Super Admin / Admin Only)
+driveRouter.post('/member-drives/:id/permissions', authMiddleware, requireRoles('SUPER_ADMIN', 'MEDIA_COORDINATOR', 'PRESIDENT'), async (req: AuthenticatedRequest, res: Response) => {
+  const { email, name, role } = req.body;
+  if (!email || !email.trim()) {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'INVALID_INPUT', message: 'Target Gmail (email) is required' }
+    });
+  }
+
+  const permissionRole: 'reader' | 'writer' = role === 'reader' ? 'reader' : 'writer';
+
+  try {
+    const updatedDrive = await DriveService.grantDriveAccessToUser({
+      driveId: req.params.id,
+      targetEmail: email.trim(),
+      targetName: name?.trim(),
+      role: permissionRole,
+      adminUser: req.user!
+    });
+
+    AuditService.log({
+      actorId: req.user!.id,
+      actorName: req.user!.full_name,
+      actorRole: req.user!.roles[0],
+      action: 'GRANT_DRIVE_PERMISSION',
+      entityType: 'FOLDER',
+      entityId: updatedDrive.driveFolderId,
+      details: {
+        memberDriveId: req.params.id,
+        targetEmail: email.trim(),
+        role: permissionRole,
+        accessType: permissionRole === 'reader' ? 'Download Only / Viewer' : 'Full Editor'
+      }
+    });
+
+    res.json({
+      success: true,
+      data: updatedDrive
+    });
+  } catch (err: any) {
+    res.status(400).json({
+      success: false,
+      error: { code: 'GRANT_PERMISSION_FAILED', message: err.message || 'Failed to grant drive permission' }
+    });
+  }
+});
+
+// 8. Update member drive owner primary access level (Download Only vs Full Editor)
+driveRouter.patch('/member-drives/:id/access-level', authMiddleware, requireRoles('SUPER_ADMIN', 'MEDIA_COORDINATOR', 'PRESIDENT'), async (req: AuthenticatedRequest, res: Response) => {
+  const { accessLevel } = req.body;
+  if (!accessLevel || (accessLevel !== 'reader' && accessLevel !== 'writer')) {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'INVALID_INPUT', message: 'accessLevel must be either "reader" (Download Only) or "writer" (Full Editor)' }
+    });
+  }
+
+  try {
+    const updatedDrive = await DriveService.updateMemberDriveAccessLevel({
+      driveId: req.params.id,
+      newAccessLevel: accessLevel,
+      adminUser: req.user!
+    });
+
+    AuditService.log({
+      actorId: req.user!.id,
+      actorName: req.user!.full_name,
+      actorRole: req.user!.roles[0],
+      action: 'UPDATE_DRIVE_ACCESS_LEVEL',
+      entityType: 'FOLDER',
+      entityId: updatedDrive.driveFolderId,
+      details: {
+        memberDriveId: req.params.id,
+        accessLevel
+      }
+    });
+
+    res.json({
+      success: true,
+      data: updatedDrive
+    });
+  } catch (err: any) {
+    res.status(400).json({
+      success: false,
+      error: { code: 'UPDATE_ACCESS_LEVEL_FAILED', message: err.message || 'Failed to update access level' }
+    });
+  }
+});
+
+// 9. Revoke access from a specific user
+driveRouter.delete('/member-drives/:id/permissions', authMiddleware, requireRoles('SUPER_ADMIN', 'MEDIA_COORDINATOR', 'PRESIDENT'), async (req: AuthenticatedRequest, res: Response) => {
+  const email = (req.body?.email || req.query?.email) as string;
+  if (!email || !email.trim()) {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'INVALID_INPUT', message: 'Target email is required to revoke access' }
+    });
+  }
+
+  try {
+    const updatedDrive = await DriveService.revokeDriveAccessFromUser({
+      driveId: req.params.id,
+      targetEmail: email.trim(),
+      adminUser: req.user!
+    });
+
+    AuditService.log({
+      actorId: req.user!.id,
+      actorName: req.user!.full_name,
+      actorRole: req.user!.roles[0],
+      action: 'REVOKE_DRIVE_PERMISSION',
+      entityType: 'FOLDER',
+      entityId: updatedDrive.driveFolderId,
+      details: {
+        memberDriveId: req.params.id,
+        targetEmail: email.trim()
+      }
+    });
+
+    res.json({
+      success: true,
+      data: updatedDrive
+    });
+  } catch (err: any) {
+    res.status(400).json({
+      success: false,
+      error: { code: 'REVOKE_PERMISSION_FAILED', message: err.message || 'Failed to revoke permission' }
+    });
   }
 });
 

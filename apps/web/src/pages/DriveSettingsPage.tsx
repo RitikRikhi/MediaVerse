@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
+import { useAuth } from '../context/AuthContext';
 import { MemberDrive, MediaAsset, UserRole } from '../types';
 import {
   HardDrive,
@@ -32,11 +34,17 @@ import {
   FolderCheck,
   Sparkles,
   Layers,
-  X
+  X,
+  Lock,
+  Shield,
+  Eye
 } from 'lucide-react';
 import { Modal } from '../components/ui/Modal';
 
 export const DriveSettingsPage: React.FC = () => {
+  const { isCoordinator, isSuperAdmin, isPresident } = useAuth();
+  const hasAdminAccess = isCoordinator || isSuperAdmin || isPresident;
+
   const [driveStatus, setDriveStatus] = useState<any>(null);
   const [authData, setAuthData] = useState<any>(null);
   const [structure, setStructure] = useState<any>(null);
@@ -62,7 +70,19 @@ export const DriveSettingsPage: React.FC = () => {
   const [newMemberEmail, setNewMemberEmail] = useState('');
   const [newMemberName, setNewMemberName] = useState('');
   const [newMemberRole, setNewMemberRole] = useState<UserRole | 'VLOGGER'>('PHOTOGRAPHER');
+  const [newMemberAccessLevel, setNewMemberAccessLevel] = useState<'reader' | 'writer'>('writer');
   const [isCreatingMemberDrive, setIsCreatingMemberDrive] = useState(false);
+
+  // Permission Delegation Modal State (Super Admin & Admin Only)
+  const [managingPermissionDrive, setManagingPermissionDrive] = useState<MemberDrive | null>(null);
+  const [showPermissionModal, setShowPermissionModal] = useState(false);
+  const [targetPermEmail, setTargetPermEmail] = useState('');
+  const [targetPermName, setTargetPermName] = useState('');
+  const [targetPermRole, setTargetPermRole] = useState<'reader' | 'writer'>('reader');
+  const [isGrantingPerm, setIsGrantingPerm] = useState(false);
+  const [revokingPermEmail, setRevokingPermEmail] = useState<string | null>(null);
+  const [togglingAccessDriveId, setTogglingAccessDriveId] = useState<string | null>(null);
+  const [crewUsers, setCrewUsers] = useState<any[]>([]);
 
   // Inspect / Edit Subfolders Modal State
   const [inspectingDrive, setInspectingDrive] = useState<MemberDrive | null>(null);
@@ -109,12 +129,13 @@ export const DriveSettingsPage: React.FC = () => {
 
   const loadData = async () => {
     try {
-      const [status, structRes, authRes, drivesRes, assetsRes] = await Promise.all([
+      const [status, structRes, authRes, drivesRes, assetsRes, usersRes] = await Promise.all([
         api.getDriveStatus(),
         api.getDriveFolderStructure().catch(() => ({ structure: null, flatList: [] })),
         api.getDriveAuthUrl().catch(() => ({ authUrl: '', isConfigured: false })),
         api.getMemberDrives().catch(() => []),
-        api.getMediaAssets().catch(() => [])
+        api.getMediaAssets().catch(() => []),
+        api.getUsers().catch(() => [])
       ]);
       setDriveStatus(status);
       setStructure(structRes.structure);
@@ -122,6 +143,7 @@ export const DriveSettingsPage: React.FC = () => {
       setAuthData(authRes);
       setMemberDrives(drivesRes);
       setAvailableAssets(assetsRes);
+      setCrewUsers(usersRes || []);
       if (structRes.structure && !addParentPath) {
         setAddParentPath(structRes.structure.path);
       }
@@ -180,20 +202,110 @@ export const DriveSettingsPage: React.FC = () => {
       const created = await api.createMemberDrive({
         memberEmail: email,
         memberName: name,
-        role: newMemberRole
+        role: newMemberRole,
+        accessLevel: newMemberAccessLevel
       });
 
       setShowCreateMemberModal(false);
       setNewMemberEmail('');
       setNewMemberName('');
+      setNewMemberAccessLevel('writer');
       setProvisionMessage(
-        `Created ${created.specializationLabel} Google Drive for ${name} (${email})! Shared as Editor in Google Drive.`
+        `Created ${created.specializationLabel} Google Drive for ${name} (${email})! Shared as ${created.accessLevel === 'reader' ? 'Download Only (Viewer)' : 'Editor'} in Google Drive.`
       );
       await loadMemberDrives();
     } catch (err: any) {
       alert(`Could not create drive: ${err.message || err}`);
     } finally {
       setIsCreatingMemberDrive(false);
+    }
+  };
+
+  // Permission Management Handlers (Super Admin & Admin Only)
+  const handleOpenPermissionModal = (drive: MemberDrive) => {
+    setManagingPermissionDrive(drive);
+    setTargetPermEmail('');
+    setTargetPermName('');
+    setTargetPermRole('reader'); // Default to Download Only
+    setShowPermissionModal(true);
+  };
+
+  const handleGrantPermission = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!managingPermissionDrive) return;
+
+    const email = targetPermEmail.trim().toLowerCase();
+    const name = targetPermName.trim() || email.split('@')[0];
+
+    if (!email || !email.includes('@')) {
+      alert('Please enter a valid Gmail address to grant access.');
+      return;
+    }
+
+    try {
+      setIsGrantingPerm(true);
+      const updatedDrive = await api.grantDriveAccess(managingPermissionDrive.id, {
+        email,
+        name,
+        role: targetPermRole
+      });
+
+      setManagingPermissionDrive(updatedDrive);
+      const updatedList = await api.getMemberDrives();
+      setMemberDrives(updatedList);
+
+      setTargetPermEmail('');
+      setTargetPermName('');
+      setProvisionMessage(
+        `Granted "${targetPermRole === 'reader' ? 'Download Only (Viewer)' : 'Full Editor'}" access to ${name} (${email}) on ${updatedDrive.memberName}'s Google Drive!`
+      );
+    } catch (err: any) {
+      alert(`Failed to grant permission: ${err.message || err}`);
+    } finally {
+      setIsGrantingPerm(false);
+    }
+  };
+
+  const handleRevokePermission = async (targetEmail: string) => {
+    if (!managingPermissionDrive) return;
+    if (!window.confirm(`Revoke Google Drive access for ${targetEmail}?`)) return;
+
+    try {
+      setRevokingPermEmail(targetEmail);
+      const updatedDrive = await api.revokeDriveAccess(managingPermissionDrive.id, targetEmail);
+      setManagingPermissionDrive(updatedDrive);
+
+      const updatedList = await api.getMemberDrives();
+      setMemberDrives(updatedList);
+
+      setProvisionMessage(`Revoked access for ${targetEmail} from ${updatedDrive.memberName}'s drive.`);
+    } catch (err: any) {
+      alert(`Failed to revoke access: ${err.message || err}`);
+    } finally {
+      setRevokingPermEmail(null);
+    }
+  };
+
+  const handleToggleAccessLevel = async (drive: MemberDrive) => {
+    const nextLevel: 'reader' | 'writer' = drive.accessLevel === 'reader' ? 'writer' : 'reader';
+    const nextLabel = nextLevel === 'reader' ? 'Download Only (Viewer)' : 'Full Editor';
+
+    try {
+      setTogglingAccessDriveId(drive.id);
+      const updated = await api.updateDriveAccessLevel(drive.id, nextLevel);
+
+      const updatedList = await api.getMemberDrives();
+      setMemberDrives(updatedList);
+      if (inspectingDrive?.id === drive.id) setInspectingDrive(updated);
+      if (managingPermissionDrive?.id === drive.id) setManagingPermissionDrive(updated);
+
+      setProvisionMessage(
+        `Updated primary access for ${drive.memberName} (${drive.memberEmail}) to ${nextLabel}.`
+      );
+    } catch (err: any) {
+      alert(`Failed to update access level: ${err.message || err}`);
+    } finally {
+      setTogglingAccessDriveId(null);
     }
   };
 
@@ -580,6 +692,47 @@ export const DriveSettingsPage: React.FC = () => {
   const rootId = driveStatus?.rootFolderId || '1PNvblS0BffXR12av3dC7fP7wNdf948kO';
   const isConnected = Boolean(driveStatus?.isConnected);
 
+  if (!hasAdminAccess) {
+    return (
+      <div className="max-w-2xl mx-auto py-16 px-4 animate-fade-in">
+        <div className="p-8 rounded-3xl bg-white border border-slate-200 shadow-xl text-center space-y-6">
+          <div className="w-16 h-16 rounded-2xl bg-red-50 text-red-600 mx-auto flex items-center justify-center">
+            <Lock className="w-8 h-8" />
+          </div>
+          <div className="space-y-2">
+            <span className="px-3 py-1 rounded-full text-xs font-bold bg-red-100 text-red-800 uppercase tracking-wider">
+              Restricted Area
+            </span>
+            <h2 className="text-2xl font-black text-slate-900 tracking-tight pt-2">
+              Super Admin & Coordinator Access Only
+            </h2>
+            <p className="text-sm text-slate-600 max-w-md mx-auto leading-relaxed">
+              Drive Studio, role-specific cloud storage provisioning, and Google Drive access delegation are reserved exclusively for Media Coordinators and Super Admins.
+            </p>
+          </div>
+          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-xs text-slate-600 max-w-md mx-auto text-left space-y-1.5">
+            <div className="font-bold text-slate-800 flex items-center gap-1.5">
+              <Shield className="w-4 h-4 text-red-600" />
+              <span>Looking for your personal drive?</span>
+            </div>
+            <p className="text-slate-500">
+              Your role-tailored Google Drive folders and upload destinations are always accessible directly inside the Field Crew Portal.
+            </p>
+          </div>
+          <div className="pt-2">
+            <Link
+              to="/field-crew"
+              className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-sm shadow-md transition-all"
+            >
+              <span>Go to Field Crew Portal</span>
+              <ChevronRight className="w-4 h-4" />
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6 max-w-7xl mx-auto animate-fade-in pb-12">
       {/* Top Banner */}
@@ -773,10 +926,38 @@ export const DriveSettingsPage: React.FC = () => {
                           <span>{drive.role}</span>
                         </span>
 
-                        <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                          <CheckCircle className="w-3 h-3 text-emerald-600" />
-                          <span>Editor Shared</span>
-                        </span>
+                        <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                          <button
+                            type="button"
+                            onClick={() => handleToggleAccessLevel(drive)}
+                            disabled={togglingAccessDriveId === drive.id}
+                            title="Click to toggle: Download Only vs Full Editor"
+                            className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border transition-all cursor-pointer ${
+                              drive.accessLevel === 'reader'
+                                ? 'text-amber-800 bg-amber-50 hover:bg-amber-100 border-amber-300'
+                                : 'text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border-emerald-300'
+                            }`}
+                          >
+                            {drive.accessLevel === 'reader' ? (
+                              <>
+                                <Eye className="w-3 h-3 text-amber-600" />
+                                <span>Download Only 👁️</span>
+                              </>
+                            ) : (
+                              <>
+                                <CheckCircle className="w-3 h-3 text-emerald-600" />
+                                <span>Full Editor ✍️</span>
+                              </>
+                            )}
+                          </button>
+
+                          {drive.grantedPermissions && drive.grantedPermissions.length > 0 && (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-200">
+                              <Shield className="w-2.5 h-2.5 text-indigo-600" />
+                              <span>+{drive.grantedPermissions.length}</span>
+                            </span>
+                          )}
+                        </div>
                       </div>
 
                       {/* Member Info */}
@@ -819,27 +1000,38 @@ export const DriveSettingsPage: React.FC = () => {
 
                     {/* Bottom Actions */}
                     <div className="mt-5 pt-4 border-t border-slate-100 flex flex-col gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenPermissionModal(drive)}
+                        className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white shadow-xs transition-colors"
+                      >
+                        <Shield className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Manage Access ({drive.grantedPermissions?.length || 0} Delegated)</span>
+                      </button>
+
                       <div className="grid grid-cols-2 gap-2">
                         <a
                           href={drive.driveWebUrl}
                           target="_blank"
                           rel="noreferrer"
-                          className="inline-flex items-center justify-center gap-1 px-3 py-2 rounded-xl text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white transition-colors"
+                          className="inline-flex items-center justify-center gap-1 px-3 py-2 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-800 transition-colors"
                         >
                           <span>Open in Drive</span>
                           <ExternalLink className="w-3 h-3" />
                         </a>
 
                         <button
+                          type="button"
                           onClick={() => handleOpenInspectModal(drive)}
                           className="inline-flex items-center justify-center gap-1 px-3 py-2 rounded-xl text-xs font-bold bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 transition-colors"
                         >
                           <Edit3 className="w-3 h-3" />
-                          <span>Edit Subfolders</span>
+                          <span>Subfolders</span>
                         </button>
                       </div>
 
                       <button
+                        type="button"
                         onClick={() => {
                           setTransferTargetFolderId(drive.driveFolderId);
                           setTransferTargetFolderPath(drive.drivePath);
@@ -1491,6 +1683,46 @@ export const DriveSettingsPage: React.FC = () => {
             </div>
           </div>
 
+          {/* Initial Access Level */}
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1.5">
+              Google Drive Permission Level:
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setNewMemberAccessLevel('writer')}
+                className={`p-2.5 rounded-xl border text-left transition-all ${
+                  newMemberAccessLevel === 'writer'
+                    ? 'border-emerald-600 bg-emerald-50 text-emerald-900 font-bold'
+                    : 'border-slate-200 bg-white text-slate-700'
+                }`}
+              >
+                <div className="flex items-center gap-1.5 text-xs">
+                  <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Full Editor (writer)</span>
+                </div>
+                <p className="text-[10px] text-slate-500 mt-0.5">Can upload, edit & delete files</p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setNewMemberAccessLevel('reader')}
+                className={`p-2.5 rounded-xl border text-left transition-all ${
+                  newMemberAccessLevel === 'reader'
+                    ? 'border-blue-600 bg-blue-50 text-blue-900 font-bold'
+                    : 'border-slate-200 bg-white text-slate-700'
+                }`}
+              >
+                <div className="flex items-center gap-1.5 text-xs">
+                  <Eye className="w-3.5 h-3.5 text-blue-600" />
+                  <span>Download Only (reader)</span>
+                </div>
+                <p className="text-[10px] text-slate-500 mt-0.5">Can view & download files only</p>
+              </button>
+            </div>
+          </div>
+
           <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
             <button
               type="button"
@@ -1652,6 +1884,248 @@ export const DriveSettingsPage: React.FC = () => {
             <div className="flex justify-end pt-2">
               <button
                 onClick={() => setShowInspectModal(false)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* ================================================= */}
+      {/* MODAL: MANAGE PERMISSIONS & ACCESS DELEGATION */}
+      {/* ================================================= */}
+      <Modal
+        isOpen={showPermissionModal}
+        onClose={() => setShowPermissionModal(false)}
+        title={managingPermissionDrive ? `Access Control: ${managingPermissionDrive.memberName}'s Drive` : 'Manage Access'}
+      >
+        {managingPermissionDrive && (
+          <div className="space-y-5">
+            {/* Owner Access Summary Card */}
+            <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 text-xs space-y-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-slate-500 font-medium">Drive Owner:</span>
+                  <span className="font-bold text-slate-900 ml-1.5">{managingPermissionDrive.memberName}</span>
+                  <span className="text-slate-500 font-mono text-[11px] block">{managingPermissionDrive.memberEmail}</span>
+                </div>
+                <div className="text-right">
+                  <span className="text-slate-500 text-[10px] block uppercase font-bold">Owner Access</span>
+                  <button
+                    type="button"
+                    onClick={() => handleToggleAccessLevel(managingPermissionDrive)}
+                    disabled={togglingAccessDriveId === managingPermissionDrive.id}
+                    className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold border transition-colors cursor-pointer ${
+                      managingPermissionDrive.accessLevel === 'reader'
+                        ? 'bg-amber-100 text-amber-900 border-amber-300'
+                        : 'bg-emerald-100 text-emerald-900 border-emerald-300'
+                    }`}
+                  >
+                    {managingPermissionDrive.accessLevel === 'reader' ? (
+                      <>
+                        <Eye className="w-3 h-3 text-amber-700" />
+                        <span>Download Only 👁️</span>
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle className="w-3 h-3 text-emerald-700" />
+                        <span>Full Editor ✍️</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Grant Permission Form */}
+            <form onSubmit={handleGrantPermission} className="p-4 rounded-2xl bg-red-50/50 border border-red-200/80 space-y-3.5">
+              <div className="flex items-center gap-2">
+                <Shield className="w-4 h-4 text-red-600" />
+                <h4 className="text-xs font-black uppercase tracking-wider text-red-950">
+                  Grant Access to Another Member (Download Only or Editor)
+                </h4>
+              </div>
+
+              {/* Quick Select from Crew Users */}
+              {crewUsers.length > 0 && (
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                    Quick Select Registered Crew Member:
+                  </label>
+                  <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto p-1 bg-white rounded-xl border border-slate-200">
+                    {crewUsers.map(u => (
+                      <button
+                        key={u.id}
+                        type="button"
+                        onClick={() => {
+                          setTargetPermEmail(u.email);
+                          setTargetPermName(u.full_name);
+                        }}
+                        className={`px-2 py-1 rounded-lg text-[10px] font-bold transition-all border ${
+                          targetPermEmail === u.email
+                            ? 'bg-red-600 text-white border-red-600'
+                            : 'bg-slate-50 text-slate-700 border-slate-200 hover:border-red-300'
+                        }`}
+                      >
+                        {u.full_name} ({u.roles?.[0] || 'CREW'})
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Target Gmail Address *
+                  </label>
+                  <input
+                    type="email"
+                    value={targetPermEmail}
+                    onChange={e => setTargetPermEmail(e.target.value)}
+                    placeholder="e.g. member@gmail.com"
+                    required
+                    className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs text-slate-900 focus:outline-none focus:border-red-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Member Name (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={targetPermName}
+                    onChange={e => setTargetPermName(e.target.value)}
+                    placeholder="e.g. Aman Sharma"
+                    className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs text-slate-900 focus:outline-none focus:border-red-500"
+                  />
+                </div>
+              </div>
+
+              {/* Role Choice: Download Only vs Full Editor */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                  Select Permission Level:
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setTargetPermRole('reader')}
+                    className={`p-3 rounded-xl border-2 text-left transition-all flex flex-col justify-between ${
+                      targetPermRole === 'reader'
+                        ? 'border-blue-600 bg-blue-50 text-blue-900'
+                        : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 font-bold text-xs">
+                      <Eye className="w-4 h-4 text-blue-600" />
+                      <span>Download Only (Viewer)</span>
+                    </div>
+                    <p className="text-[10px] text-slate-500 mt-1 leading-snug">
+                      Can view, stream & download photos and video. CANNOT edit, rename, upload or delete files.
+                    </p>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setTargetPermRole('writer')}
+                    className={`p-3 rounded-xl border-2 text-left transition-all flex flex-col justify-between ${
+                      targetPermRole === 'writer'
+                        ? 'border-emerald-600 bg-emerald-50 text-emerald-900'
+                        : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 font-bold text-xs">
+                      <CheckCircle className="w-4 h-4 text-emerald-600" />
+                      <span>Full Editor</span>
+                    </div>
+                    <p className="text-[10px] text-slate-500 mt-1 leading-snug">
+                      Can upload new media, rename, edit folders, and delete files directly in Google Drive.
+                    </p>
+                  </button>
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={isGrantingPerm || !targetPermEmail.trim()}
+                className="w-full py-2.5 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white shadow-xs transition-colors flex items-center justify-center gap-2"
+              >
+                {isGrantingPerm ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Granting in Google Drive...</span>
+                  </>
+                ) : (
+                  <>
+                    <Shield className="w-3.5 h-3.5" />
+                    <span>Grant {targetPermRole === 'reader' ? 'Download Only' : 'Editor'} Access</span>
+                  </>
+                )}
+              </button>
+            </form>
+
+            {/* Currently Delegated Permissions List */}
+            <div className="space-y-2">
+              <h4 className="text-xs font-black uppercase tracking-wider text-slate-700">
+                Delegated Permissions ({managingPermissionDrive.grantedPermissions?.length || 0})
+              </h4>
+
+              {(!managingPermissionDrive.grantedPermissions || managingPermissionDrive.grantedPermissions.length === 0) ? (
+                <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 text-center text-xs text-slate-500">
+                  No other members have been delegated access to this drive yet. Use the form above to grant Download Only or Editor access.
+                </div>
+              ) : (
+                <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                  {managingPermissionDrive.grantedPermissions.map(perm => (
+                    <div
+                      key={perm.email}
+                      className="p-3 rounded-xl border border-slate-200 bg-white flex items-center justify-between gap-3 shadow-2xs"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold text-slate-900 truncate">
+                            {perm.name || perm.email}
+                          </span>
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                            perm.role === 'reader'
+                              ? 'bg-blue-50 text-blue-700 border-blue-200'
+                              : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                          }`}>
+                            {perm.role === 'reader' ? '👁️ Download Only' : '✍️ Full Editor'}
+                          </span>
+                        </div>
+                        <p className="text-[11px] font-mono text-slate-500 truncate mt-0.5">
+                          {perm.email} • Granted by {perm.grantedBy}
+                        </p>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleRevokePermission(perm.email)}
+                        disabled={revokingPermEmail === perm.email}
+                        className="px-2.5 py-1.5 rounded-lg text-xs font-bold text-rose-600 hover:bg-rose-50 border border-rose-200 transition-colors shrink-0 flex items-center gap-1 cursor-pointer"
+                        title="Revoke Google Drive access"
+                      >
+                        {revokingPermEmail === perm.email ? (
+                          <RefreshCw className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <Trash2 className="w-3 h-3" />
+                        )}
+                        <span>Revoke</span>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setShowPermissionModal(false)}
                 className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100"
               >
                 Close
