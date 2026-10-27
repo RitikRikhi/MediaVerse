@@ -101,6 +101,7 @@ export class DriveService {
   private static tokenState: DriveTokenState = {};
   private static folderIdCache = new Map<string, string>();
   private static memberDrives: MemberDrive[] = [];
+  private static tokenRefreshPromise: Promise<string | null> | null = null;
 
   static init(): void {
     this.loadTokensFromDisk();
@@ -253,53 +254,63 @@ export class DriveService {
   }
 
   static async refreshAccessToken(): Promise<string | null> {
-    let cleanToken = (this.tokenState.refreshToken || '').trim();
-    while (
-      (cleanToken.startsWith('"') && cleanToken.endsWith('"')) ||
-      (cleanToken.startsWith("'") && cleanToken.endsWith("'")) ||
-      (cleanToken.startsWith('`') && cleanToken.endsWith('`'))
-    ) {
-      cleanToken = cleanToken.slice(1, -1).trim();
-    }
-    if ((cleanToken.startsWith('\\"') && cleanToken.endsWith('\\"')) || (cleanToken.startsWith("\\'") && cleanToken.endsWith("\\'"))) {
-      cleanToken = cleanToken.slice(2, -2).trim();
+    if (this.tokenRefreshPromise) {
+      return this.tokenRefreshPromise;
     }
 
-    if (!cleanToken) {
-      console.warn('[DriveService] No refresh token available to refresh access token.');
-      return null;
-    }
-    this.tokenState.refreshToken = cleanToken;
+    this.tokenRefreshPromise = (async () => {
+      try {
+        let cleanToken = (this.tokenState.refreshToken || '').trim();
+        while (
+          (cleanToken.startsWith('"') && cleanToken.endsWith('"')) ||
+          (cleanToken.startsWith("'") && cleanToken.endsWith("'")) ||
+          (cleanToken.startsWith('`') && cleanToken.endsWith('`'))
+        ) {
+          cleanToken = cleanToken.slice(1, -1).trim();
+        }
+        if ((cleanToken.startsWith('\\"') && cleanToken.endsWith('\\"')) || (cleanToken.startsWith("\\'") && cleanToken.endsWith("\\'"))) {
+          cleanToken = cleanToken.slice(2, -2).trim();
+        }
 
-    try {
-      console.log(`[DriveService] Refreshing Google Drive OAuth access token (Token length: ${cleanToken.length}, starts with: ${cleanToken.slice(0, 7)}..., clientId length: ${config.google.clientId.length})...`);
-      const response = await fetch('https://oauth2.googleapis.com/token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-          client_id: config.google.clientId,
-          client_secret: config.google.clientSecret,
-          refresh_token: cleanToken,
-          grant_type: 'refresh_token'
-        })
-      });
+        if (!cleanToken) {
+          console.warn('[DriveService] No refresh token available to refresh access token.');
+          return null;
+        }
+        this.tokenState.refreshToken = cleanToken;
 
-      if (!response.ok) {
-        const err = await response.text();
-        console.warn(`[DriveService] Token refresh rejected by Google (${response.status}):`, err);
+        console.log(`[DriveService] Refreshing Google Drive OAuth access token (Token length: ${cleanToken.length}, starts with: ${cleanToken.slice(0, 7)}..., clientId length: ${config.google.clientId.length})...`);
+        const response = await fetch('https://oauth2.googleapis.com/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            client_id: config.google.clientId,
+            client_secret: config.google.clientSecret,
+            refresh_token: cleanToken,
+            grant_type: 'refresh_token'
+          })
+        });
+
+        if (!response.ok) {
+          const err = await response.text();
+          console.warn(`[DriveService] Token refresh rejected by Google (${response.status}):`, err);
+          return null;
+        }
+
+        const data = (await response.json()) as any;
+        this.tokenState.accessToken = data.access_token;
+        this.tokenState.expiryDate = Date.now() + (data.expires_in || 3600) * 1000;
+        this.saveTokensToDisk();
+        console.log('[DriveService] Google Drive access token refreshed successfully.');
+        return this.tokenState.accessToken || null;
+      } catch (err: any) {
+        console.error('[DriveService] Error during token refresh:', err.message);
         return null;
+      } finally {
+        this.tokenRefreshPromise = null;
       }
+    })();
 
-      const data = (await response.json()) as any;
-      this.tokenState.accessToken = data.access_token;
-      this.tokenState.expiryDate = Date.now() + (data.expires_in || 3600) * 1000;
-      this.saveTokensToDisk();
-      console.log('[DriveService] Google Drive access token refreshed successfully.');
-      return this.tokenState.accessToken || null;
-    } catch (err: any) {
-      console.error('[DriveService] Error during token refresh:', err.message);
-      return null;
-    }
+    return this.tokenRefreshPromise;
   }
 
   static async getValidAccessToken(): Promise<string | null> {

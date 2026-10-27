@@ -44,17 +44,21 @@ interface QueuedFile {
   originalSize: number;
   previewUrl?: string;
   mediaType: MediaType;
-  status: 'QUEUED' | 'OPTIMIZING' | 'UPLOADING' | 'COMPLETED' | 'FAILED';
+  status: 'QUEUED' | 'OPTIMIZING' | 'UPLOADING' | 'VERIFYING' | 'REGISTERING' | 'COMPLETED' | 'FAILED' | 'REGISTRATION_FAILED';
   progress: number;
   loadedBytes?: number;
   totalBytes?: number;
   speedBytesPerSec?: number;
   etaSeconds?: number;
   error?: string;
+  driveFileId?: string;
+  uploadUrl?: string;
   driveWebUrl?: string;
   driveFolderUrl?: string;
   isOptimized?: boolean;
   reductionPercent?: number;
+  attemptCount?: number;
+  errorStage?: 'SESSION' | 'UPLOAD' | 'REGISTER';
 }
 
 export const FieldCrewPortalPage: React.FC = () => {
@@ -111,6 +115,16 @@ export const FieldCrewPortalPage: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dropzoneRef = useRef<HTMLDivElement>(null);
   const uploadFilesRef = useRef<QueuedFile[]>([]);
+  const isUploadingRef = useRef<boolean>(false);
+  const processingIdsRef = useRef<Set<string>>(new Set<string>());
+  const itemProgressRef = useRef<Map<string, {
+    progress: number;
+    loadedBytes: number;
+    totalBytes: number;
+    speedBytesPerSec?: number;
+    etaSeconds?: number;
+    lastStateUpdate: number;
+  }>>(new Map());
 
   useEffect(() => {
     uploadFilesRef.current = uploadFiles;
@@ -305,20 +319,22 @@ export const FieldCrewPortalPage: React.FC = () => {
     if (rawFiles.length === 0) return;
     if (fileInputRef.current) fileInputRef.current.value = '';
 
-    const newQueued: QueuedFile[] = rawFiles.map(file => {
+    const newQueued: QueuedFile[] = rawFiles.map((file, idx) => {
       const isVideo = file.type.startsWith('video/') || /\.(mp4|mov|mkv|avi|m4v)$/i.test(file.name);
       const isPhoto = file.type.startsWith('image/') || /\.(jpg|jpeg|png|heic|raw|cr2|nef|arw)$/i.test(file.name);
       const mediaType: MediaType = isVideo ? 'RAW_VIDEO' : isPhoto ? 'RAW_PHOTO' : 'OTHER';
+      const uniqueSuffix = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID().slice(0, 8) : Math.random().toString(36).slice(2, 8);
 
       return {
-        id: `${file.name}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        id: `queue-${Date.now()}-${idx}-${uniqueSuffix}`,
         file,
         originalFile: file,
         originalSize: file.size,
         previewUrl: isPhoto && rawFiles.length <= 16 ? URL.createObjectURL(file) : undefined,
         mediaType,
         status: 'QUEUED',
-        progress: 0
+        progress: 0,
+        attemptCount: 0
       };
     });
 
@@ -344,15 +360,21 @@ export const FieldCrewPortalPage: React.FC = () => {
     return `${mins}m ${secs < 10 ? '0' : ''}${secs}s`;
   };
 
-  // Upload single file directly to Google Drive in 8 MiB chunks with auto-retry & offset resumption
+  // Upload single file directly to Google Drive in 8 MiB chunks with auto-retry, offset resumption & idempotent registration
   const uploadSingleFileWithRetry = async (
     item: QueuedFile,
     assignment: Assignment,
     maxRetries = 2
-  ): Promise<{ success: boolean; data?: any; error?: string }> => {
-    let attempts = 0;
+  ): Promise<{ success: boolean; data?: any; error?: string; stage?: 'SESSION' | 'UPLOAD' | 'REGISTER'; driveFileId?: string; uploadUrl?: string }> => {
+    let attempts = item.attemptCount || 0;
     while (attempts <= maxRetries) {
       try {
+        attempts++;
+        // Track current attempt count on item
+        setUploadFiles(prev =>
+          prev.map(f => (f.id === item.id ? { ...f, attemptCount: attempts } : f))
+        );
+
         // Just-In-Time Turbo Mode optimization right before streaming this specific file
         let fileToUpload = item.file;
         if (turboMode && item.mediaType === 'RAW_PHOTO' && !item.isOptimized) {
@@ -370,8 +392,10 @@ export const FieldCrewPortalPage: React.FC = () => {
           }
         }
 
+        // Set status to REGISTERING if we already have a confirmed driveFileId, otherwise UPLOADING
+        const initialStatus = item.driveFileId ? 'REGISTERING' : 'UPLOADING';
         setUploadFiles(prev =>
-          prev.map(f => (f.id === item.id ? { ...f, status: 'UPLOADING', progress: 5 } : f))
+          prev.map(f => (f.id === item.id ? { ...f, status: initialStatus, progress: f.progress || 5 } : f))
         );
 
         const result = await uploadDirectToGoogleDrive({
@@ -382,27 +406,53 @@ export const FieldCrewPortalPage: React.FC = () => {
           targetFolderId: selectedFolderId || destinationFolderInfo?.driveFolderId,
           targetFolderPath: selectedFolderPath || destinationFolderInfo?.fullPath,
           description: `Uploaded for ${assignment.title}`,
+          driveFileId: item.driveFileId,
+          uploadUrl: item.uploadUrl,
+          queueItemId: item.id,
+          attempt: attempts,
           onProgress: (prog) => {
-            setUploadFiles(prev =>
-              prev.map(f =>
-                f.id === item.id
-                  ? {
-                      ...f,
-                      progress: prog.percentage,
-                      loadedBytes: prog.loadedBytes,
-                      totalBytes: prog.totalBytes,
-                      speedBytesPerSec: prog.speedBytesPerSec,
-                      etaSeconds: prog.etaSeconds
-                    }
-                  : f
-              )
-            );
+            const now = Date.now();
+            const tracked = itemProgressRef.current.get(item.id);
+            const lastUpdate = tracked?.lastStateUpdate || 0;
+            const diffPct = Math.abs(prog.percentage - (tracked?.progress || 0));
+
+            // Keep reference cache updated with live byte metrics
+            itemProgressRef.current.set(item.id, {
+              progress: prog.percentage,
+              loadedBytes: prog.loadedBytes,
+              totalBytes: prog.totalBytes,
+              speedBytesPerSec: prog.speedBytesPerSec,
+              etaSeconds: prog.etaSeconds,
+              lastStateUpdate: (now - lastUpdate >= 250 || diffPct >= 5 || prog.percentage === 100) ? now : lastUpdate
+            });
+
+            // Throttle React state re-renders to at most once per 250ms (or large progress step / completion)
+            // This prevents main thread CPU lockup from 60+ state dispatches per second across 100 files
+            if (now - lastUpdate >= 250 || diffPct >= 5 || prog.percentage === 100) {
+              setUploadFiles(prev =>
+                prev.map(f =>
+                  f.id === item.id
+                    ? {
+                        ...f,
+                        progress: prog.percentage,
+                        loadedBytes: prog.loadedBytes,
+                        totalBytes: prog.totalBytes,
+                        speedBytesPerSec: prog.speedBytesPerSec,
+                        etaSeconds: prog.etaSeconds
+                      }
+                    : f
+                )
+              );
+            }
           }
         });
 
         if (result.success) {
           return {
             success: true,
+            driveFileId: result.driveFileId,
+            uploadUrl: result.uploadUrl,
+            stage: 'REGISTER',
             data: {
               asset: result.asset,
               destination: result.destination || {
@@ -412,20 +462,33 @@ export const FieldCrewPortalPage: React.FC = () => {
             }
           };
         } else {
+          // Preserve returned driveFileId and uploadUrl for subsequent idempotent retries
+          if (result.driveFileId) item.driveFileId = result.driveFileId;
+          if (result.uploadUrl) item.uploadUrl = result.uploadUrl;
           throw new Error(result.error || 'Direct Drive upload failed');
         }
       } catch (err: any) {
-        attempts++;
         if (attempts > maxRetries) {
-          return { success: false, error: err.message || 'Upload failed after retries' };
+          return {
+            success: false,
+            error: err.message || 'Upload failed after retries',
+            driveFileId: item.driveFileId,
+            uploadUrl: item.uploadUrl,
+            stage: item.driveFileId ? 'REGISTER' : 'UPLOAD'
+          };
         }
-        await new Promise(r => setTimeout(r, 1200));
+        await new Promise(r => setTimeout(r, 1000));
       }
     }
-    return { success: false, error: 'Upload failed' };
+    return {
+      success: false,
+      error: 'Upload failed',
+      driveFileId: item.driveFileId,
+      uploadUrl: item.uploadUrl
+    };
   };
 
-  // High-Speed Concurrent Upload Pipeline (3 Parallel Streams)
+  // High-Speed Concurrent Upload Pipeline (Controlled 3 Parallel Streams)
   const handleStartUpload = async () => {
     if (!selectedAssignment || uploadFiles.length === 0) return;
 
@@ -434,75 +497,101 @@ export const FieldCrewPortalPage: React.FC = () => {
       return;
     }
 
-    // Get all pending items (QUEUED or FAILED) from the live reference
-    const currentList = uploadFilesRef.current.length > 0 ? uploadFilesRef.current : uploadFiles;
-    const pendingList = currentList.filter(f => f.status === 'QUEUED' || f.status === 'FAILED');
-
-    if (pendingList.length === 0) {
+    // Synchronous mutex lock to eliminate double-clicks and concurrent worker triggers
+    if (isUploadingRef.current) {
+      console.warn('[Queue] Upload batch already active, suppressing duplicate invocation.');
       return;
     }
-
+    isUploadingRef.current = true;
     setIsUploading(true);
     setUploadSummaryMessage('');
 
-    let queueIndex = 0;
     let completedCount = 0;
     let failedCount = 0;
-    const concurrency = Math.min(3, pendingList.length); // 3 files uploading in parallel for max throughput
 
-    const worker = async () => {
-      while (true) {
-        let itemIndex = -1;
-        if (queueIndex < pendingList.length) {
-          itemIndex = queueIndex++;
-        } else {
-          break; // Entire 100+ file queue finished!
-        }
+    try {
+      // Get all pending items (QUEUED, FAILED, or REGISTRATION_FAILED) from the live reference
+      const currentList = uploadFilesRef.current.length > 0 ? uploadFilesRef.current : uploadFiles;
+      const pendingList = currentList.filter(f => f.status === 'QUEUED' || f.status === 'FAILED' || f.status === 'REGISTRATION_FAILED');
 
-        const item = pendingList[itemIndex];
-        if (!item) break;
-
-        const res = await uploadSingleFileWithRetry(item, selectedAssignment);
-
-        if (res.success && res.data) {
-          completedCount++;
-          setUploadFiles(prev =>
-            prev.map(f =>
-              f.id === item.id
-                ? {
-                    ...f,
-                    status: 'COMPLETED',
-                    progress: 100,
-                    driveWebUrl: res.data.asset?.drive_web_url,
-                    driveFolderUrl: res.data.destination?.driveFolderUrl
-                  }
-                : f
-            )
-          );
-        } else {
-          failedCount++;
-          setUploadFiles(prev =>
-            prev.map(f =>
-              f.id === item.id
-                ? {
-                    ...f,
-                    status: 'FAILED',
-                    error: res.error || 'Upload failed'
-                  }
-                : f
-            )
-          );
-        }
+      if (pendingList.length === 0) {
+        return;
       }
-    };
 
-    const workers = [];
-    for (let i = 0; i < concurrency; i++) {
-      workers.push(worker());
+      // Concurrency: 3 parallel streams provides optimal throughput without triggering Google Drive rate limits
+      const concurrency = Math.min(3, pendingList.length);
+
+      const worker = async () => {
+        while (true) {
+          // Atomically acquire next item not currently in-flight
+          let item: QueuedFile | null = null;
+          for (const candidate of pendingList) {
+            if (!processingIdsRef.current.has(candidate.id)) {
+              // Check current state from live ref to ensure completed items are never re-uploaded
+              const liveItem = uploadFilesRef.current.find(f => f.id === candidate.id) || candidate;
+              if (liveItem.status === 'COMPLETED') continue;
+
+              processingIdsRef.current.add(candidate.id);
+              item = liveItem;
+              break;
+            }
+          }
+
+          if (!item) break; // All pending items in this batch claimed!
+
+          try {
+            const res = await uploadSingleFileWithRetry(item, selectedAssignment);
+
+            if (res.success && res.data) {
+              completedCount++;
+              setUploadFiles(prev =>
+                prev.map(f =>
+                  f.id === item!.id
+                    ? {
+                        ...f,
+                        status: 'COMPLETED',
+                        progress: 100,
+                        driveFileId: res.driveFileId || f.driveFileId,
+                        driveWebUrl: res.data.asset?.drive_web_url,
+                        driveFolderUrl: res.data.destination?.driveFolderUrl
+                      }
+                    : f
+                )
+              );
+            } else {
+              failedCount++;
+              const isRegFail = Boolean(res.driveFileId) || res.stage === 'REGISTER';
+              setUploadFiles(prev =>
+                prev.map(f =>
+                  f.id === item!.id
+                    ? {
+                        ...f,
+                        status: isRegFail ? 'REGISTRATION_FAILED' : 'FAILED',
+                        driveFileId: res.driveFileId || f.driveFileId,
+                        uploadUrl: res.uploadUrl || f.uploadUrl,
+                        errorStage: res.stage,
+                        error: res.error || (isRegFail ? 'Drive upload succeeded but database registration failed.' : 'Upload failed')
+                      }
+                    : f
+                )
+              );
+            }
+          } finally {
+            processingIdsRef.current.delete(item.id);
+          }
+        }
+      };
+
+      const workers = [];
+      for (let i = 0; i < concurrency; i++) {
+        workers.push(worker());
+      }
+      await Promise.all(workers);
+    } finally {
+      isUploadingRef.current = false;
+      setIsUploading(false);
+      processingIdsRef.current.clear();
     }
-    await Promise.all(workers);
-
-    setIsUploading(false);
 
     const folderTargetDisplay = selectedFolderPath || destinationFolderInfo?.fullPath || 'SAVISKAR 2026';
     if (completedCount > 0) {
@@ -546,7 +635,7 @@ export const FieldCrewPortalPage: React.FC = () => {
   const overallQueuePercent = totalQueueBytes > 0 ? Math.min(100, Math.round((totalQueueLoadedBytes / totalQueueBytes) * 100)) : 0;
   const activeSpeed = uploadFiles.find(f => f.status === 'UPLOADING' && f.speedBytesPerSec)?.speedBytesPerSec;
 
-  const pendingCount = uploadFiles.filter(f => f.status === 'QUEUED' || f.status === 'FAILED').length;
+  const pendingCount = uploadFiles.filter(f => f.status === 'QUEUED' || f.status === 'FAILED' || f.status === 'REGISTRATION_FAILED').length;
   const completedCount = uploadFiles.filter(f => f.status === 'COMPLETED').length;
 
   const completedShotsCount = selectedAssignment?.checklist?.filter(c => c.is_completed).length || 0;
@@ -1117,8 +1206,10 @@ export const FieldCrewPortalPage: React.FC = () => {
                             className={`p-3 rounded-xl border flex flex-col gap-2 transition-all ${
                               item.status === 'COMPLETED'
                                 ? 'bg-emerald-50/50 border-emerald-200'
-                                : item.status === 'UPLOADING'
+                                : item.status === 'UPLOADING' || item.status === 'REGISTERING' || item.status === 'VERIFYING'
                                 ? 'bg-red-50/40 border-red-200 shadow-2xs'
+                                : item.status === 'REGISTRATION_FAILED'
+                                ? 'bg-amber-50/40 border-amber-200'
                                 : 'bg-white border-slate-200/90'
                             }`}
                           >
@@ -1187,6 +1278,17 @@ export const FieldCrewPortalPage: React.FC = () => {
                                       </span>
                                     )}
                                   </div>
+                                ) : item.status === 'REGISTERING' || item.status === 'VERIFYING' ? (
+                                  <span className="text-xs font-bold text-blue-600 flex items-center gap-1">
+                                    <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Verifying & Syncing...
+                                  </span>
+                                ) : item.status === 'REGISTRATION_FAILED' ? (
+                                  <div className="flex flex-col items-end">
+                                    <span className="text-xs font-bold text-amber-700 flex items-center gap-1" title={item.error}>
+                                      <AlertTriangle className="w-4 h-4 text-amber-500" /> Saved in Drive (Sync Pending)
+                                    </span>
+                                    <span className="text-[10px] text-amber-600">Tap Upload All to retry sync</span>
+                                  </div>
                                 ) : item.status === 'FAILED' ? (
                                   <span className="text-xs font-bold text-red-600 flex items-center gap-1" title={item.error}>
                                     <AlertCircle className="w-4 h-4" /> Failed
@@ -1208,10 +1310,10 @@ export const FieldCrewPortalPage: React.FC = () => {
                             </div>
 
                             {/* Live Progress Bar */}
-                            {item.status === 'UPLOADING' && (
+                            {(item.status === 'UPLOADING' || item.status === 'REGISTERING') && (
                               <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
                                 <div
-                                  className="bg-red-600 h-1.5 rounded-full transition-all duration-150"
+                                  className={`h-1.5 rounded-full transition-all duration-150 ${item.status === 'REGISTERING' ? 'bg-blue-600' : 'bg-red-600'}`}
                                   style={{ width: `${item.progress}%` }}
                                 />
                               </div>

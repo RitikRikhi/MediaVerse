@@ -167,6 +167,12 @@ mediaRouter.post('/upload-complete', authMiddleware, async (req: AuthenticatedRe
         success: true,
         data: {
           asset: existing,
+          destination: {
+            fullPath: targetFolderPath || 'SAVISKAR 2026',
+            folderName: targetFolderPath || 'SAVISKAR 2026',
+            driveFolderId: targetFolderId,
+            driveFolderUrl: targetFolderId ? `https://drive.google.com/drive/folders/${targetFolderId}` : existing.drive_web_url
+          },
           message: 'Asset was already registered.'
         }
       });
