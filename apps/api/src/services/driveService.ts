@@ -2511,15 +2511,25 @@ export class DriveService {
 
   static loadMemberDrivesFromDisk(): void {
     const filePath = resolveMemberFilePath();
+    const demoEmails = [
+      'photographer@dsa.cgc.edu.in',
+      'videographer@dsa.cgc.edu.in',
+      'editor@dsa.cgc.edu.in',
+      'karan.photo@dsa.cgc.edu.in',
+      'coordinator@dsa.cgc.edu.in'
+    ];
+
     try {
       if (fs.existsSync(filePath)) {
         const raw = fs.readFileSync(filePath, 'utf-8');
         const parsed: any[] = JSON.parse(raw);
-        this.memberDrives = parsed.map(m => ({
-          ...m,
-          accessLevel: m.accessLevel || 'writer',
-          grantedPermissions: m.grantedPermissions || []
-        }));
+        this.memberDrives = (Array.isArray(parsed) ? parsed : [])
+          .filter(m => !demoEmails.includes((m.memberEmail || '').toLowerCase()))
+          .map(m => ({
+            ...m,
+            accessLevel: m.accessLevel || 'writer',
+            grantedPermissions: m.grantedPermissions || []
+          }));
         console.log(`[DriveService] Loaded ${this.memberDrives.length} member drives from disk.`);
         return;
       }
@@ -2527,84 +2537,36 @@ export class DriveService {
       console.warn(`[DriveService] Failed to load member drives from disk: ${err.message}`);
     }
 
-    // Pre-seed default member drives for existing crew members
-    const initialSeed: MemberDrive[] = [
-      {
-        id: 'member-drive-rohan-photo',
-        memberEmail: 'photographer@dsa.cgc.edu.in',
-        memberName: 'Rohan Singh',
-        role: 'PHOTOGRAPHER',
-        specializationLabel: 'Photography Lead (RAW & Stills Only)',
-        driveFolderId: '1tFGNR9WZo_9dGgf_6zBOHdBnpPRxBQXQ',
-        driveWebUrl: 'https://drive.google.com/drive/folders/1tFGNR9WZo_9dGgf_6zBOHdBnpPRxBQXQ',
-        drivePath: '/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Rohan Singh (PHOTOGRAPHER)',
-        sharedWithEmail: 'photographer@dsa.cgc.edu.in',
-        accessLevel: 'writer',
-        grantedPermissions: [],
-        createdAt: new Date('2026-09-01T10:00:00Z').toISOString(),
-        updatedAt: new Date().toISOString(),
-        subfolders: this.getPersonalDriveTemplates('PHOTOGRAPHER').map(name => ({
-          id: `sub-${crypto.randomUUID().slice(0, 8)}`,
-          name,
-          path: `/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Rohan Singh (PHOTOGRAPHER)/${name}`,
-          driveFolderId: `1tFGNR9WZo_${name.slice(0, 5)}`,
-          driveWebUrl: 'https://drive.google.com/drive/folders/1tFGNR9WZo_9dGgf_6zBOHdBnpPRxBQXQ',
-          isDefault: true,
-          created_at: new Date().toISOString()
-        }))
-      },
-      {
-        id: 'member-drive-vikram-video',
-        memberEmail: 'videographer@dsa.cgc.edu.in',
-        memberName: 'Vikram Malhotra',
-        role: 'VIDEOGRAPHER',
-        specializationLabel: 'Videography & Vlogging (4K Footage & BTS)',
-        driveFolderId: '1m7U0n1wuICACLVBmKl8YYLqEXvmVALWQ',
-        driveWebUrl: 'https://drive.google.com/drive/folders/1m7U0n1wuICACLVBmKl8YYLqEXvmVALWQ',
-        drivePath: '/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Vikram Malhotra (VIDEOGRAPHER)',
-        sharedWithEmail: 'videographer@dsa.cgc.edu.in',
-        accessLevel: 'writer',
-        grantedPermissions: [],
-        createdAt: new Date('2026-09-01T10:00:00Z').toISOString(),
-        updatedAt: new Date().toISOString(),
-        subfolders: this.getPersonalDriveTemplates('VIDEOGRAPHER').map(name => ({
-          id: `sub-${crypto.randomUUID().slice(0, 8)}`,
-          name,
-          path: `/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Vikram Malhotra (VIDEOGRAPHER)/${name}`,
-          driveFolderId: `1m7U0n1wu_${name.slice(0, 5)}`,
-          driveWebUrl: 'https://drive.google.com/drive/folders/1m7U0n1wuICACLVBmKl8YYLqEXvmVALWQ',
-          isDefault: true,
-          created_at: new Date().toISOString()
-        }))
-      },
-      {
-        id: 'member-drive-simran-editor',
-        memberEmail: 'editor@dsa.cgc.edu.in',
-        memberName: 'Simran Kaur',
-        role: 'VIDEO_EDITOR',
-        specializationLabel: 'Reels, Recaps & Broadcast Delivery',
-        driveFolderId: '1Mgc1jPrW1OnjXCWh24ExtC7Selj5v0kb',
-        driveWebUrl: 'https://drive.google.com/drive/folders/1Mgc1jPrW1OnjXCWh24ExtC7Selj5v0kb',
-        drivePath: '/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Simran Kaur (VIDEO_EDITOR)',
-        sharedWithEmail: 'editor@dsa.cgc.edu.in',
-        accessLevel: 'writer',
-        grantedPermissions: [],
-        createdAt: new Date('2026-09-01T10:00:00Z').toISOString(),
-        updatedAt: new Date().toISOString(),
-        subfolders: this.getPersonalDriveTemplates('VIDEO_EDITOR').map(name => ({
-          id: `sub-${crypto.randomUUID().slice(0, 8)}`,
-          name,
-          path: `/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Simran Kaur (VIDEO_EDITOR)/${name}`,
-          driveFolderId: `1Mgc1jPr_${name.slice(0, 5)}`,
-          driveWebUrl: 'https://drive.google.com/drive/folders/1Mgc1jPrW1OnjXCWh24ExtC7Selj5v0kb',
-          isDefault: true,
-          created_at: new Date().toISOString()
-        }))
-      }
-    ];
-
-    this.memberDrives = initialSeed;
+    this.memberDrives = [];
     this.saveMemberDrivesToDisk();
+  }
+
+  static async deleteMemberDrive(memberDriveId: string): Promise<{ success: boolean; message: string }> {
+    const drive = this.getMemberDriveById(memberDriveId);
+    if (!drive) {
+      throw new Error(`Member drive with ID "${memberDriveId}" not found.`);
+    }
+
+    const driveFolderId = drive.driveFolderId;
+    const memberEmail = drive.memberEmail.toLowerCase();
+
+    // Remove from in-memory memberDrives
+    this.memberDrives = this.memberDrives.filter(
+      m => m.id !== drive.id && m.memberEmail.toLowerCase() !== memberEmail
+    );
+
+    // Remove associated folders from db.mediaFolders
+    db.mediaFolders = db.mediaFolders.filter(
+      f => f.drive_folder_id !== driveFolderId && f.parent_folder_id !== driveFolderId && f.user_name !== drive.memberName
+    );
+
+    this.saveMemberDrivesToDisk();
+    console.log(`[DriveService] Removed member drive for ${drive.memberName} (${drive.memberEmail}) from Drive Studio.`);
+
+    return {
+      success: true,
+      message: `Member drive for "${drive.memberName}" removed successfully.`
+    };
   }
 
   static saveMemberDrivesToDisk(): void {

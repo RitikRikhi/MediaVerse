@@ -20,10 +20,12 @@ authRouter.post('/login', async (req: Request, res: Response) => {
 
   try {
     const result = await AuthService.login({ email, password });
-    // Proactively provision user's personal drive in Google Drive in background
-    DriveService.provisionPersonalUserDrive(result.user).catch(err => {
-      console.warn(`[DriveService] Background personal drive provisioning notice: ${err.message}`);
-    });
+    // Proactively provision field crew user's personal drive in Google Drive in background
+    if (result.user.roles.some(r => ['PHOTOGRAPHER', 'VIDEOGRAPHER', 'VIDEO_EDITOR'].includes(r))) {
+      DriveService.provisionPersonalUserDrive(result.user).catch(err => {
+        console.warn(`[DriveService] Background personal drive provisioning notice: ${err.message}`);
+      });
+    }
     AuditService.log({
       actorId: result.user.id,
       actorName: result.user.full_name,
@@ -65,10 +67,12 @@ authRouter.post('/register', async (req: Request, res: Response) => {
       phone
     });
 
-    // Proactively provision user's personal drive in Google Drive in background
-    DriveService.provisionPersonalUserDrive(result.user).catch(err => {
-      console.warn(`[DriveService] Background personal drive provisioning notice: ${err.message}`);
-    });
+    // Proactively provision field crew user's personal drive in Google Drive in background
+    if (['PHOTOGRAPHER', 'VIDEOGRAPHER', 'VIDEO_EDITOR'].includes(role as string)) {
+      DriveService.provisionPersonalUserDrive(result.user).catch(err => {
+        console.warn(`[DriveService] Background personal drive provisioning notice: ${err.message}`);
+      });
+    }
 
     AuditService.log({
       actorId: result.user.id,

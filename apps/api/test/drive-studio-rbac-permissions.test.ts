@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { DriveService } from '../src/services/driveService';
 import { db } from '../src/db/memoryStore';
-import { AuthService } from '../src/services/authService';
 
 describe('Drive Studio RBAC & Access Delegation System', () => {
   const superAdmin = {
@@ -43,17 +42,16 @@ describe('Drive Studio RBAC & Access Delegation System', () => {
   }, 30000);
 
   it('should allow Super Admin to grant Download-Only (reader) access of one person\'s drive to another member', async () => {
-    // Member drive owner: Rohan
     const drives = DriveService.getAllMemberDrives();
-    const rohanDrive = drives.find(d => d.role === 'PHOTOGRAPHER');
-    expect(rohanDrive).toBeDefined();
+    const targetDrive = drives[0];
+    expect(targetDrive).toBeDefined();
 
-    // Super Admin gives Simran "Download Only (reader)" access to Rohan's Photography drive
+    // Super Admin gives Simran "Download Only (reader)" access to the member's Photography drive
     const targetEmail = 'simran.viewer@dsa.cgc.edu.in';
     const targetName = 'Simran Kaur';
 
     const updatedDrive = await DriveService.grantDriveAccessToUser({
-      driveId: rohanDrive!.id,
+      driveId: targetDrive.id,
       targetEmail,
       targetName,
       role: 'reader',
@@ -70,14 +68,14 @@ describe('Drive Studio RBAC & Access Delegation System', () => {
 
   it('should allow Super Admin to grant Full Editor (writer) access to a collaborator', async () => {
     const drives = DriveService.getAllMemberDrives();
-    const rohanDrive = drives.find(d => d.role === 'PHOTOGRAPHER');
-    expect(rohanDrive).toBeDefined();
+    const targetDrive = drives[0];
+    expect(targetDrive).toBeDefined();
 
     const editorEmail = 'lead.editor@dsa.cgc.edu.in';
     const editorName = 'Lead Editor Rahul';
 
     const updatedDrive = await DriveService.grantDriveAccessToUser({
-      driveId: rohanDrive!.id,
+      driveId: targetDrive.id,
       targetEmail: editorEmail,
       targetName: editorName,
       role: 'writer',
@@ -112,22 +110,34 @@ describe('Drive Studio RBAC & Access Delegation System', () => {
 
   it('should allow Super Admin to revoke delegated drive access cleanly', async () => {
     const drives = DriveService.getAllMemberDrives();
-    const rohanDrive = drives.find(d => d.role === 'PHOTOGRAPHER');
-    expect(rohanDrive).toBeDefined();
+    const targetDrive = drives[0];
+    expect(targetDrive).toBeDefined();
 
     const targetEmail = 'simran.viewer@dsa.cgc.edu.in';
 
     // Verify permission exists before revoke
-    expect(rohanDrive?.grantedPermissions?.some(p => p.email === targetEmail)).toBe(true);
+    expect(targetDrive.grantedPermissions?.some(p => p.email === targetEmail)).toBe(true);
 
     // Revoke access
     const updatedDrive = await DriveService.revokeDriveAccessFromUser({
-      driveId: rohanDrive!.id,
+      driveId: targetDrive.id,
       targetEmail,
       adminUser: superAdmin
     });
 
     // Verify permission was removed
     expect(updatedDrive.grantedPermissions?.some(p => p.email === targetEmail)).toBe(false);
+  });
+
+  it('should allow Super Admin to delete/remove a member drive from Drive Studio', async () => {
+    const drives = DriveService.getAllMemberDrives();
+    const driveToDelete = drives[0];
+    expect(driveToDelete).toBeDefined();
+
+    const delResult = await DriveService.deleteMemberDrive(driveToDelete.id);
+    expect(delResult.success).toBe(true);
+
+    const remaining = DriveService.getAllMemberDrives();
+    expect(remaining.some(d => d.id === driveToDelete.id)).toBe(false);
   });
 });

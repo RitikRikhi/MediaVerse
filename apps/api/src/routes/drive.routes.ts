@@ -573,6 +573,25 @@ driveRouter.get('/member-drives/:id', authMiddleware, requireRoles('SUPER_ADMIN'
   });
 });
 
+// 3b. Delete an entire member drive (Super Admin / Coordinator)
+driveRouter.delete('/member-drives/:id', authMiddleware, requireRoles('SUPER_ADMIN', 'MEDIA_COORDINATOR', 'PRESIDENT'), async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const result = await DriveService.deleteMemberDrive(req.params.id);
+    AuditService.log({
+      actorId: req.user!.id,
+      actorName: req.user!.full_name,
+      actorRole: req.user!.roles[0],
+      action: 'DELETE_MEMBER_DRIVE',
+      entityType: 'FOLDER',
+      entityId: req.params.id,
+      details: { memberDriveId: req.params.id }
+    });
+    res.json({ success: true, data: result });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: { message: err.message } });
+  }
+});
+
 // 4. Add subfolder inside a member's drive
 driveRouter.post('/member-drives/:id/subfolders', authMiddleware, requireRoles('SUPER_ADMIN', 'MEDIA_COORDINATOR', 'PRESIDENT'), async (req: AuthenticatedRequest, res: Response) => {
   const { folderName, parentFolderId } = req.body;

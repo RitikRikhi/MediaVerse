@@ -511,6 +511,12 @@ class ApiClient {
     return this.request<MemberDrive>(`/drive/member-drives/${id}`);
   }
 
+  async deleteMemberDrive(id: string): Promise<{ success: boolean; message: string }> {
+    return this.request<{ success: boolean; message: string }>(`/drive/member-drives/${id}`, {
+      method: 'DELETE'
+    });
+  }
+
   async grantDriveAccess(
     driveId: string,
     payload: { email: string; name?: string; role: 'reader' | 'writer' }

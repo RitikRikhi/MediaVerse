@@ -309,6 +309,25 @@ export const DriveSettingsPage: React.FC = () => {
     }
   };
 
+  const [isDeletingDriveId, setIsDeletingDriveId] = useState<string | null>(null);
+
+  const handleDeleteMemberDrive = async (drive: MemberDrive) => {
+    if (!window.confirm(`Are you sure you want to remove ${drive.memberName}'s drive (${drive.memberEmail}) from Drive Studio?`)) {
+      return;
+    }
+
+    try {
+      setIsDeletingDriveId(drive.id);
+      await api.deleteMemberDrive(drive.id);
+      setMemberDrives(prev => prev.filter(d => d.id !== drive.id && d.memberEmail.toLowerCase() !== drive.memberEmail.toLowerCase()));
+      setProvisionMessage(`Removed ${drive.memberName}'s drive from Drive Studio.`);
+    } catch (err: any) {
+      alert(`Failed to remove drive: ${err.message || err}`);
+    } finally {
+      setIsDeletingDriveId(null);
+    }
+  };
+
   // Inspect Subfolders
   const handleOpenInspectModal = (drive: MemberDrive) => {
     setInspectingDrive(drive);
@@ -1044,6 +1063,23 @@ export const DriveSettingsPage: React.FC = () => {
                         <ArrowRightLeft className="w-3 h-3 text-red-600" />
                         <span>Transfer Data Into This Drive</span>
                       </button>
+
+                      <div className="pt-1 border-t border-slate-100">
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteMemberDrive(drive)}
+                          disabled={isDeletingDriveId === drive.id}
+                          className="w-full inline-flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-bold text-rose-600 hover:text-rose-700 hover:bg-rose-50 border border-transparent hover:border-rose-200 transition-colors cursor-pointer"
+                          title="Remove this account drive from Drive Studio"
+                        >
+                          {isDeletingDriveId === drive.id ? (
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Trash2 className="w-3.5 h-3.5" />
+                          )}
+                          <span>Remove Account Drive</span>
+                        </button>
+                      </div>
                     </div>
                   </div>
                 );
