@@ -15,6 +15,8 @@ import {
   CheckSquare,
   Square,
   UploadCloud,
+  Upload,
+  X,
   FolderOpen,
   MapPin,
   Clock,
@@ -91,16 +93,18 @@ export const FieldCrewPortalPage: React.FC = () => {
   // Day filter for left task list
   const [dayFilter, setDayFilter] = useState<'ALL' | 'DAY_1' | 'DAY_2'>('ALL');
 
-  // Turbo Event Compression Mode (Off by default to preserve 100% original RAW and 4K video quality)
+  // Turbo Event Compression Mode (Off by default for lossless 100% RAW/4K quality)
   const [turboMode, setTurboMode] = useState<boolean>(false);
 
-  // Upload Queue State & Sequential Batch Processing
-  const [uploadFiles, setUploadFiles] = useState<QueuedFile[]>([]);
-  const [isUploading, setIsUploading] = useState(false);
-  const [isPaused, setIsPaused] = useState(false);
-  const [currentFileIndex, setCurrentFileIndex] = useState<number>(-1);
-  const [currentFileName, setCurrentFileName] = useState<string>('');
-  const [uploadSummaryMessage, setUploadSummaryMessage] = useState('');
+  // Direct PC Upload State (Identical to Super Admin Drive Studio method)
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [isUploading, setIsUploading] = useState<boolean>(false);
+  const [currentFileIndex, setCurrentFileIndex] = useState<number>(0);
+  const [currentFileProgress, setCurrentFileProgress] = useState<number>(0);
+  const [overallProgress, setOverallProgress] = useState<number>(0);
+  const [successResults, setSuccessResults] = useState<Array<{ name: string; url: string; folder: string }>>([]);
+  const [uploadErrorMessage, setUploadErrorMessage] = useState<string>('');
+
   const [destinationFolderInfo, setDestinationFolderInfo] = useState<any>(null);
   const [driveFolders, setDriveFolders] = useState<any[]>([]);
   const [selectedFolderId, setSelectedFolderId] = useState<string>('');
@@ -121,24 +125,7 @@ export const FieldCrewPortalPage: React.FC = () => {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dropzoneRef = useRef<HTMLDivElement>(null);
-  const uploadFilesRef = useRef<QueuedFile[]>([]);
-  const isUploadingRef = useRef<boolean>(false);
-  const isPausedRef = useRef<boolean>(false);
   const isCancelledRef = useRef<boolean>(false);
-  const pauseResolverRef = useRef<(() => void) | null>(null);
-  const activeAbortControllerRef = useRef<AbortController | null>(null);
-  const itemProgressRef = useRef<Map<string, {
-    progress: number;
-    loadedBytes: number;
-    totalBytes: number;
-    speedBytesPerSec?: number;
-    etaSeconds?: number;
-    lastStateUpdate: number;
-  }>>(new Map());
-
-  useEffect(() => {
-    uploadFilesRef.current = uploadFiles;
-  }, [uploadFiles]);
 
   const loadAssignments = async () => {
     try {
@@ -328,228 +315,51 @@ export const FieldCrewPortalPage: React.FC = () => {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
   };
 
-  // Add files to queue immediately with status QUEUED (JIT optimization is applied during streaming)
-  const handleFilesSelected = (e: React.ChangeEvent<HTMLInputElement> | { target: { files: File[] } }) => {
-    const rawFiles = e.target.files ? Array.from(e.target.files) : [];
-    if (rawFiles.length === 0) return;
-    if (fileInputRef.current) fileInputRef.current.value = '';
+  // File selection (identical to Super Admin Drive Studio Direct PC Upload)
+  const handleFilesSelected = (input: FileList | File[] | React.ChangeEvent<HTMLInputElement> | null) => {
+    let files: File[] = [];
+    if (!input) return;
+    if ('target' in input && input.target) {
+      files = input.target.files ? Array.from(input.target.files) : [];
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    } else if (input instanceof FileList || Array.isArray(input)) {
+      files = Array.from(input);
+    }
+    if (files.length === 0) return;
 
-    const newQueued: QueuedFile[] = rawFiles.map((file, idx) => {
-      const isVideo = file.type.startsWith('video/') || /\.(mp4|mov|mkv|avi|m4v)$/i.test(file.name);
-      const isPhoto = file.type.startsWith('image/') || /\.(jpg|jpeg|png|heic|raw|cr2|nef|arw)$/i.test(file.name);
-      const mediaType: MediaType = isVideo ? 'RAW_VIDEO' : isPhoto ? 'RAW_PHOTO' : 'OTHER';
-      const uniqueSuffix = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID().slice(0, 8) : Math.random().toString(36).slice(2, 8);
-
-      return {
-        id: `queue-${Date.now()}-${idx}-${uniqueSuffix}`,
-        file,
-        originalFile: file,
-        originalSize: file.size,
-        previewUrl: isPhoto && rawFiles.length <= 16 ? URL.createObjectURL(file) : undefined,
-        mediaType,
-        status: 'QUEUED',
-        progress: 0,
-        attemptCount: 0
-      };
-    });
-
-    setUploadFiles(prev => [...prev, ...newQueued]);
+    setSelectedFiles(prev => [...prev, ...files]);
+    setSuccessResults([]);
+    setUploadErrorMessage('');
     setActiveTab('upload');
   };
 
-  const handleRemoveQueuedFile = (id: string) => {
-    setUploadFiles(prev => prev.filter(f => f.id !== id));
+  const handleRemoveFile = (index: number) => {
+    setSelectedFiles(prev => prev.filter((_, i) => i !== index));
   };
 
-  const formatSpeed = (bytesPerSec?: number): string => {
-    if (!bytesPerSec || bytesPerSec === 0) return '';
-    const mb = bytesPerSec / (1024 * 1024);
-    if (mb >= 1) return `${mb.toFixed(1)} MB/s`;
-    return `${Math.round(bytesPerSec / 1024)} KB/s`;
+  const handleClearAll = () => {
+    setSelectedFiles([]);
+    setSuccessResults([]);
+    setUploadErrorMessage('');
+    setCurrentFileIndex(0);
+    setCurrentFileProgress(0);
+    setOverallProgress(0);
   };
 
-  const formatEta = (seconds?: number): string => {
-    if (!seconds || seconds <= 0 || !isFinite(seconds)) return '';
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}m ${secs < 10 ? '0' : ''}${secs}s`;
-  };
-
-  // Check for fatal non-retryable errors (auth, permissions, storage quota, or cancellation)
-  const isNonRetryableError = (errorMsg: string): boolean => {
-    const lower = (errorMsg || '').toLowerCase();
-    return (
-      lower.includes('aborted') ||
-      lower.includes('cancelled') ||
-      lower.includes('401') ||
-      lower.includes('403') ||
-      lower.includes('unauthorized') ||
-      lower.includes('unauthenticated') ||
-      lower.includes('permission') ||
-      lower.includes('quota') ||
-      lower.includes('not connected') ||
-      lower.includes('drive sync offline')
-    );
-  };
-
-  // Upload single file directly to Google Drive in 8 MiB chunks with auto-retry, offset resumption & idempotent registration
-  const uploadSingleFileWithRetry = async (
-    item: QueuedFile,
-    assignment: Assignment,
-    signal?: AbortSignal,
-    maxRetries = 2
-  ): Promise<{ success: boolean; data?: any; error?: string; stage?: 'SESSION' | 'UPLOAD' | 'REGISTER'; driveFileId?: string; uploadUrl?: string }> => {
-    let attempts = item.attemptCount || 0;
-    while (attempts <= maxRetries) {
-      if (signal?.aborted) {
-        return {
-          success: false,
-          error: 'Upload cancelled by user',
-          driveFileId: item.driveFileId,
-          uploadUrl: item.uploadUrl
-        };
-      }
-
-      try {
-        attempts++;
-        // Track current attempt count on item
-        setUploadFiles(prev =>
-          prev.map(f => (f.id === item.id ? { ...f, attemptCount: attempts } : f))
-        );
-
-        // Optional Turbo Mode optimization (user opted-in)
-        let fileToUpload = item.file;
-        if (turboMode && item.mediaType === 'RAW_PHOTO' && !item.isOptimized) {
-          setUploadFiles(prev =>
-            prev.map(f => (f.id === item.id ? { ...f, status: 'OPTIMIZING' } : f))
-          );
-          try {
-            const opt = await optimizeImageFile(item.file);
-            fileToUpload = opt.file;
-            item.file = opt.file;
-            item.isOptimized = opt.isOptimized;
-            item.reductionPercent = opt.reductionPercent;
-          } catch (e) {
-            console.warn('JIT optimization skipped, using original file:', e);
-          }
-        }
-
-        // Set status to REGISTERING if we already have a confirmed driveFileId, otherwise UPLOADING
-        const initialStatus = item.driveFileId ? 'REGISTERING' : 'UPLOADING';
-        setUploadFiles(prev =>
-          prev.map(f => (f.id === item.id ? { ...f, status: initialStatus, progress: f.progress || 5 } : f))
-        );
-
-        const result = await uploadDirectToGoogleDrive({
-          file: fileToUpload,
-          assignmentId: assignment.id,
-          eventId: assignment.event_id,
-          mediaType: item.mediaType,
-          targetFolderId: selectedFolderId || destinationFolderInfo?.driveFolderId,
-          targetFolderPath: selectedFolderPath || destinationFolderInfo?.fullPath,
-          description: `Uploaded for ${assignment.title}`,
-          driveFileId: item.driveFileId,
-          uploadUrl: item.uploadUrl,
-          queueItemId: item.id,
-          attempt: attempts,
-          signal,
-          onProgress: (prog) => {
-            const now = Date.now();
-            const tracked = itemProgressRef.current.get(item.id);
-            const lastUpdate = tracked?.lastStateUpdate || 0;
-            const diffPct = Math.abs(prog.percentage - (tracked?.progress || 0));
-
-            // Keep reference cache updated with live byte metrics
-            itemProgressRef.current.set(item.id, {
-              progress: prog.percentage,
-              loadedBytes: prog.loadedBytes,
-              totalBytes: prog.totalBytes,
-              speedBytesPerSec: prog.speedBytesPerSec,
-              etaSeconds: prog.etaSeconds,
-              lastStateUpdate: (now - lastUpdate >= 250 || diffPct >= 5 || prog.percentage === 100) ? now : lastUpdate
-            });
-
-            // Throttle React state re-renders to at most once per 250ms
-            if (now - lastUpdate >= 250 || diffPct >= 5 || prog.percentage === 100) {
-              setUploadFiles(prev =>
-                prev.map(f =>
-                  f.id === item.id
-                    ? {
-                        ...f,
-                        progress: prog.percentage,
-                        loadedBytes: prog.loadedBytes,
-                        totalBytes: prog.totalBytes,
-                        speedBytesPerSec: prog.speedBytesPerSec,
-                        etaSeconds: prog.etaSeconds
-                      }
-                    : f
-                )
-              );
-            }
-          }
-        });
-
-        if (result.success) {
-          return {
-            success: true,
-            driveFileId: result.driveFileId,
-            uploadUrl: result.uploadUrl,
-            stage: 'REGISTER',
-            data: {
-              asset: result.asset,
-              destination: result.destination || {
-                driveFolderUrl: result.driveFolderUrl,
-                driveFolderId: selectedFolderId || destinationFolderInfo?.driveFolderId
-              }
-            }
-          };
-        } else {
-          // Preserve returned driveFileId and uploadUrl for subsequent idempotent retries
-          if (result.driveFileId) item.driveFileId = result.driveFileId;
-          if (result.uploadUrl) item.uploadUrl = result.uploadUrl;
-          throw new Error(result.error || 'Direct Drive upload failed');
-        }
-      } catch (err: any) {
-        if (signal?.aborted) {
-          return {
-            success: false,
-            error: 'Upload cancelled by user',
-            driveFileId: item.driveFileId,
-            uploadUrl: item.uploadUrl
-          };
-        }
-
-        const isFatal = isNonRetryableError(err.message || '');
-        if (attempts > maxRetries || isFatal) {
-          return {
-            success: false,
-            error: err.message || 'Upload failed after retries',
-            driveFileId: item.driveFileId,
-            uploadUrl: item.uploadUrl,
-            stage: item.driveFileId ? 'REGISTER' : 'UPLOAD'
-          };
-        }
-        await new Promise(r => setTimeout(r, 1000));
-      }
-    }
-    return {
-      success: false,
-      error: 'Upload failed',
-      driveFileId: item.driveFileId,
-      uploadUrl: item.uploadUrl
-    };
-  };
-
-  // Robust Sequential Batch Processor: Exactly 1 file at a time automatically
-  const handleStartUpload = async () => {
-    if (uploadFiles.length === 0) return;
+  // Direct PC Upload Execution (Identical to Super Admin Drive Studio method)
+  const handleExecuteUpload = async () => {
+    if (selectedFiles.length === 0) return;
 
     if (!driveStatus?.isConnected) {
-      setUploadSummaryMessage('Error: Google Drive is not connected. Please connect Google Drive first.');
+      setUploadErrorMessage('Google Drive is offline. Please check connection in Drive Studio.');
       return;
     }
 
-    // Intelligently fallback assignment if none is currently selected
+    // Determine target folder destination
+    const targetFolderId = selectedFolderId || destinationFolderInfo?.driveFolderId;
+    const targetFolderPath = selectedFolderPath || destinationFolderInfo?.fullPath || 'SAVISKAR 2026';
+
+    // Intelligently fallback assignment if none is selected
     let activeAssignment: Assignment = selectedAssignment!;
     if (!activeAssignment) {
       const targetCoverage = (activeRole === 'VIDEOGRAPHER' || isVideographer || roleMediaFilter === 'VIDEO')
@@ -577,210 +387,93 @@ export const FieldCrewPortalPage: React.FC = () => {
       };
     }
 
-    // Mutex lock to eliminate double clicks
-    if (isUploadingRef.current) {
-      if (isPausedRef.current) {
-        handleResumeUpload();
-      }
-      return;
-    }
-
-    isUploadingRef.current = true;
-    isPausedRef.current = false;
-    isCancelledRef.current = false;
-    setIsUploading(true);
-    setIsPaused(false);
-    setUploadSummaryMessage('');
-
-    let completedCount = 0;
-    let failedCount = 0;
-
     try {
-      const currentList = uploadFilesRef.current.length > 0 ? uploadFilesRef.current : uploadFiles;
-      
-      // Process one file at a time sequentially from top to bottom
-      for (let i = 0; i < currentList.length; i++) {
-        // 1. Cancellation check
+      setIsUploading(true);
+      isCancelledRef.current = false;
+      setCurrentFileIndex(0);
+      setCurrentFileProgress(0);
+      setOverallProgress(0);
+      setSuccessResults([]);
+      setUploadErrorMessage('');
+
+      const uploadedResults: Array<{ name: string; url: string; folder: string }> = [];
+      const totalFiles = selectedFiles.length;
+
+      for (let i = 0; i < totalFiles; i++) {
         if (isCancelledRef.current) {
-          console.log('[Sequential Processor] Upload batch cancelled.');
+          console.log('[Upload] Sequential batch cancelled by user.');
           break;
-        }
-
-        // 2. Pause check
-        if (isPausedRef.current) {
-          console.log('[Sequential Processor] Upload batch paused. Awaiting user resume...');
-          await new Promise<void>((resolve) => {
-            pauseResolverRef.current = resolve;
-          });
-        }
-
-        // 3. Post-pause cancel check
-        if (isCancelledRef.current) {
-          break;
-        }
-
-        // Always read the freshest live state of this item
-        const item = uploadFilesRef.current.find(f => f.id === currentList[i].id) || currentList[i];
-
-        // Never restart or re-upload already completed files
-        if (item.status === 'COMPLETED') {
-          continue;
         }
 
         setCurrentFileIndex(i);
-        setCurrentFileName(item.file.name);
-        activeAbortControllerRef.current = new AbortController();
+        setCurrentFileProgress(0);
+        const currentFile = selectedFiles[i];
 
-        try {
-          const res = await uploadSingleFileWithRetry(
-            item,
-            activeAssignment,
-            activeAbortControllerRef.current.signal
-          );
+        // Determine media type according to user's station / file extension
+        const isVideo = currentFile.type.startsWith('video/') || /\.(mp4|mov|mkv|avi|m4v|prores)$/i.test(currentFile.name);
+        const isAudio = currentFile.type.startsWith('audio/') || /\.(wav|mp3|aac|m4a)$/i.test(currentFile.name);
+        const isPhoto = currentFile.type.startsWith('image/') || /\.(jpg|jpeg|png|heic|raw|cr2|cr3|nef|arw|dng)$/i.test(currentFile.name);
 
-          if (res.success && res.data) {
-            completedCount++;
-            setUploadFiles(prev =>
-              prev.map(f =>
-                f.id === item.id
-                  ? {
-                      ...f,
-                      status: 'COMPLETED',
-                      progress: 100,
-                      driveFileId: res.driveFileId || f.driveFileId,
-                      driveWebUrl: res.data.asset?.drive_web_url,
-                      driveFolderUrl: res.data.destination?.driveFolderUrl,
-                      error: undefined
-                    }
-                  : f
-              )
-            );
-          } else {
-            failedCount++;
-            const isRegFail = Boolean(res.driveFileId) || res.stage === 'REGISTER';
-            setUploadFiles(prev =>
-              prev.map(f =>
-                f.id === item.id
-                  ? {
-                      ...f,
-                      status: isRegFail ? 'REGISTRATION_FAILED' : 'FAILED',
-                      driveFileId: res.driveFileId || f.driveFileId,
-                      uploadUrl: res.uploadUrl || f.uploadUrl,
-                      errorStage: res.stage,
-                      error: res.error || (isRegFail ? 'Drive upload succeeded but database registration failed.' : 'Upload failed')
-                    }
-                  : f
-              )
-            );
-          }
-        } catch (fileErr: any) {
-          if (activeAbortControllerRef.current?.signal.aborted) {
-            console.log(`[Sequential Processor] File ${item.file.name} cancelled by user.`);
-            break;
-          }
-          failedCount++;
-          setUploadFiles(prev =>
-            prev.map(f =>
-              f.id === item.id
-                ? {
-                    ...f,
-                    status: 'FAILED',
-                    error: fileErr.message || 'Upload failed'
-                  }
-                : f
-            )
-          );
-        } finally {
-          activeAbortControllerRef.current = null;
+        let mediaType: MediaType = 'RAW_PHOTO';
+        if (roleMediaFilter === 'VIDEO' || isVideo) {
+          mediaType = 'RAW_VIDEO';
+        } else if (isPhoto) {
+          mediaType = 'RAW_PHOTO';
+        } else if (isAudio) {
+          mediaType = 'OTHER';
         }
-      }
-    } finally {
-      isUploadingRef.current = false;
-      isPausedRef.current = false;
-      setIsUploading(false);
-      setIsPaused(false);
-      setCurrentFileIndex(-1);
-      setCurrentFileName('');
-      activeAbortControllerRef.current = null;
-      pauseResolverRef.current = null;
-    }
 
-    const folderTargetDisplay = selectedFolderPath || destinationFolderInfo?.fullPath || 'SAVISKAR 2026';
-    if (completedCount > 0) {
-      setUploadSummaryMessage(
-        failedCount === 0
-          ? `✓ Successfully uploaded all ${completedCount} file(s) into Google Drive folder "${folderTargetDisplay}".`
-          : `✓ Uploaded ${completedCount} file(s) into Google Drive folder "${folderTargetDisplay}" (${failedCount} failed - click "Retry Failed" to sync remaining).`
-      );
+        let fileToSend = currentFile;
+        if (turboMode && isPhoto) {
+          try {
+            const opt = await optimizeImageFile(currentFile);
+            if (opt?.file) fileToSend = opt.file;
+          } catch {}
+        }
+
+        const formData = new FormData();
+        formData.append('file', fileToSend);
+        if (targetFolderId) formData.append('target_folder_id', targetFolderId);
+        formData.append('target_folder_path', targetFolderPath);
+        formData.append('media_type', mediaType);
+        if (activeAssignment?.id) formData.append('assignment_id', activeAssignment.id);
+        if (activeAssignment?.event_id) formData.append('event_id', activeAssignment.event_id);
+        formData.append('description', `Uploaded by field crew for ${activeAssignment?.title || 'SAVISKAR 2026'}`);
+
+        const res = await api.uploadMediaFile(formData, (percent) => {
+          setCurrentFileProgress(percent);
+          const overall = Math.round(((i + (percent / 100)) / totalFiles) * 100);
+          setOverallProgress(overall);
+        });
+
+        uploadedResults.push({
+          name: currentFile.name,
+          url: res.asset?.drive_web_url || '',
+          folder: targetFolderPath
+        });
+      }
+
+      setOverallProgress(100);
+      setSuccessResults(uploadedResults);
+      setSelectedFiles([]);
+
+      // Refresh media feed
       if (activeAssignment?.id && activeAssignment.id !== 'general-field-upload') {
         api.getMediaAssets({ assignment_id: activeAssignment.id }).then(setAssignedMedia).catch(() => {});
         api.getAssignment(activeAssignment.id).then(setSelectedAssignment).catch(() => {});
       }
-    } else if (failedCount > 0) {
-      setUploadSummaryMessage(`Upload failed for ${failedCount} file(s). View error details below or click Retry Failed.`);
+    } catch (err: any) {
+      console.error('[Upload Error]', err);
+      setUploadErrorMessage(err.message || 'Error uploading file to Google Drive. Please retry.');
+    } finally {
+      setIsUploading(false);
     }
   };
 
-  // Pause batch processing safely
-  const handlePauseUpload = () => {
-    if (!isUploadingRef.current || isPausedRef.current) return;
-    isPausedRef.current = true;
-    setIsPaused(true);
-  };
-
-  // Resume batch processing safely
-  const handleResumeUpload = () => {
-    if (!isPausedRef.current) return;
-    isPausedRef.current = false;
-    setIsPaused(false);
-    if (pauseResolverRef.current) {
-      pauseResolverRef.current();
-      pauseResolverRef.current = null;
-    }
-  };
-
-  // Cancel batch processing safely (never deletes already uploaded Drive files)
   const handleCancelUpload = () => {
     isCancelledRef.current = true;
-    isPausedRef.current = false;
-    if (pauseResolverRef.current) {
-      pauseResolverRef.current();
-      pauseResolverRef.current = null;
-    }
-    if (activeAbortControllerRef.current) {
-      activeAbortControllerRef.current.abort();
-      activeAbortControllerRef.current = null;
-    }
-    setIsPaused(false);
     setIsUploading(false);
-    isUploadingRef.current = false;
-    setCurrentFileIndex(-1);
-    setCurrentFileName('');
-    setUploadSummaryMessage('Upload batch stopped. All previously uploaded files remain safely stored in Google Drive.');
-  };
-
-  // Retry failed items safely (idempotent, skips re-uploading bytes if already in Drive)
-  const handleRetryFailed = () => {
-    if (isUploadingRef.current) return;
-    setUploadFiles(prev =>
-      prev.map(f =>
-        f.status === 'FAILED' || f.status === 'REGISTRATION_FAILED'
-          ? { ...f, status: f.driveFileId ? 'REGISTRATION_FAILED' : 'QUEUED', error: undefined }
-          : f
-      )
-    );
-    setTimeout(() => {
-      handleStartUpload();
-    }, 50);
-  };
-
-  // Clear entire queue and free object URLs
-  const handleClearQueue = () => {
-    uploadFiles.forEach(f => {
-      if (f.previewUrl) URL.revokeObjectURL(f.previewUrl);
-    });
-    setUploadFiles([]);
-    setUploadSummaryMessage('');
+    setUploadErrorMessage('Upload stopped. Files already transferred remain safely in Google Drive.');
   };
 
   // Drag and drop handlers
@@ -793,29 +486,9 @@ export const FieldCrewPortalPage: React.FC = () => {
     e.preventDefault();
     e.stopPropagation();
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      handleFilesSelected({ target: { files: Array.from(e.dataTransfer.files) } });
+      handleFilesSelected(e.dataTransfer.files);
     }
   };
-
-  // Calculate totals for optimization metrics
-  const totalOriginalBytes = uploadFiles.reduce((acc, f) => acc + f.originalSize, 0);
-  const totalUploadBytes = uploadFiles.reduce((acc, f) => acc + f.file.size, 0);
-  const totalSavedBytes = Math.max(0, totalOriginalBytes - totalUploadBytes);
-  const totalSavedMB = (totalSavedBytes / (1024 * 1024)).toFixed(1);
-
-  const totalQueueBytes = uploadFiles.reduce((acc, f) => acc + f.file.size, 0);
-  const totalQueueLoadedBytes = uploadFiles.reduce((acc, f) => {
-    if (f.status === 'COMPLETED') return acc + f.file.size;
-    return acc + (f.loadedBytes || 0);
-  }, 0);
-  const overallQueuePercent = totalQueueBytes > 0 ? Math.min(100, Math.round((totalQueueLoadedBytes / totalQueueBytes) * 100)) : 0;
-  const activeSpeed = uploadFiles.find(f => f.status === 'UPLOADING' && f.speedBytesPerSec)?.speedBytesPerSec;
-
-  const totalCount = uploadFiles.length;
-  const pendingCount = uploadFiles.filter(f => f.status === 'QUEUED' || f.status === 'FAILED' || f.status === 'REGISTRATION_FAILED').length;
-  const completedCount = uploadFiles.filter(f => f.status === 'COMPLETED').length;
-  const failedCount = uploadFiles.filter(f => f.status === 'FAILED' || f.status === 'REGISTRATION_FAILED').length;
-  const remainingCount = uploadFiles.filter(f => f.status === 'QUEUED' || f.status === 'OPTIMIZING' || f.status === 'UPLOADING' || f.status === 'VERIFYING' || f.status === 'REGISTERING').length;
 
   const completedShotsCount = selectedAssignment?.checklist?.filter(c => c.is_completed).length || 0;
   const totalShotsCount = selectedAssignment?.checklist?.length || 0;
@@ -1077,9 +750,9 @@ export const FieldCrewPortalPage: React.FC = () => {
                   >
                     <UploadCloud className="w-4 h-4" />
                     <span>Fast Upload</span>
-                    {uploadFiles.length > 0 && (
+                    {selectedFiles.length > 0 && (
                       <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-red-100 text-red-800">
-                        {uploadFiles.length}
+                        {selectedFiles.length}
                       </span>
                     )}
                   </button>
@@ -1294,312 +967,148 @@ export const FieldCrewPortalPage: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Summary / Success Message */}
-                  {uploadSummaryMessage && (
-                    <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-800 font-semibold flex items-center justify-between gap-3 shadow-2xs">
-                      <div className="flex items-center gap-2">
-                        <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
-                        <span>{uploadSummaryMessage}</span>
-                      </div>
-                      {destinationFolderInfo?.driveFolderUrl && (
-                        <a
-                          href={destinationFolderInfo.driveFolderUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-[11px] font-bold text-emerald-900 underline shrink-0 hover:text-emerald-700"
+                  {/* Selected Files List (Identical to Super Admin Drive Studio Direct PC Upload) */}
+                  {selectedFiles.length > 0 && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-slate-800">
+                          {selectedFiles.length} files selected ({formatFileSize(selectedFiles.reduce((acc, f) => acc + f.size, 0))})
+                        </span>
+                        <button
+                          type="button"
+                          disabled={isUploading}
+                          onClick={handleClearAll}
+                          className="text-xs text-rose-600 hover:underline font-bold disabled:opacity-50 cursor-pointer"
                         >
-                          View in Google Drive ↗
-                        </a>
-                      )}
+                          Clear All
+                        </button>
+                      </div>
+                      <div className="max-h-48 overflow-y-auto space-y-1 border border-slate-200 rounded-xl p-2 bg-slate-50/50">
+                        {selectedFiles.map((file, idx) => (
+                          <div key={`${file.name}-${idx}`} className="flex items-center justify-between p-2 rounded-lg bg-white border border-slate-200 text-xs">
+                            <span className="font-bold text-slate-800 truncate mr-2">{file.name}</span>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <span className="text-[10px] text-slate-400 font-mono">({formatFileSize(file.size)})</span>
+                              <button
+                                type="button"
+                                disabled={isUploading}
+                                onClick={() => handleRemoveFile(idx)}
+                                className="text-slate-400 hover:text-rose-600 disabled:opacity-50 cursor-pointer"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
 
-                  {/* Queued Files Worklist */}
-                  {uploadFiles.length > 0 && (
-                    <div className="p-5 rounded-2xl bg-white border border-slate-200/80 shadow-xs space-y-4">
-                      {/* Batch Controls & Queue Status Header */}
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <h4 className="text-sm font-bold text-slate-900">
-                              Selected Files ({uploadFiles.length})
-                            </h4>
-                            {isUploading && !isPaused && (
-                              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800 animate-pulse flex items-center gap-1">
-                                <RefreshCw className="w-3 h-3 animate-spin" /> Sequential Processing (1 file at a time)
-                              </span>
-                            )}
-                            {isPaused && (
-                              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900 flex items-center gap-1">
-                                <Pause className="w-3 h-3" /> Batch Paused
-                              </span>
-                            )}
-                            {totalSavedBytes > 0 && !isUploading && (
-                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                Saved {totalSavedMB} MB with Turbo ⚡
-                              </span>
-                            )}
-                          </div>
-                          <p className="text-xs text-slate-500 mt-1">
-                            Progress: <strong className="text-slate-800">{completedCount}/{uploadFiles.length} completed</strong> ({formatFileSize(totalQueueLoadedBytes)} of {formatFileSize(totalQueueBytes)})
-                            {activeSpeed && activeSpeed > 0 ? ` • ${formatSpeed(activeSpeed)}` : ''}
-                          </p>
-                          {isUploading && (
-                            <div className="mt-2 max-w-md w-full bg-slate-100 rounded-full h-2 overflow-hidden border border-slate-200">
-                              <div
-                                className="bg-red-600 h-2 rounded-full transition-all duration-200"
-                                style={{ width: `${overallQueuePercent}%` }}
-                              />
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Control Buttons: Start, Pause, Resume, Cancel, Retry, Clear */}
-                        <div className="flex items-center gap-2 flex-wrap self-start sm:self-auto shrink-0">
-                          {!isUploading && !isPaused && (
-                            <>
-                              <button
-                                onClick={handleClearQueue}
-                                className="px-3 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:text-red-600 hover:bg-slate-100 transition-colors"
-                              >
-                                Clear
-                              </button>
-
-                              {failedCount > 0 && (
-                                <button
-                                  onClick={handleRetryFailed}
-                                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-600 text-white shadow-xs transition-colors"
-                                  title="Retry only failed or unverified uploads"
-                                >
-                                  <RefreshCw className="w-3.5 h-3.5" />
-                                  <span>Retry Failed ({failedCount})</span>
-                                </button>
-                              )}
-
-                              <button
-                                onClick={handleStartUpload}
-                                disabled={pendingCount === 0}
-                                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white shadow-xs transition-colors"
-                              >
-                                <Zap className="w-4 h-4 fill-current" />
-                                <span>Start Upload ({pendingCount} Files)</span>
-                              </button>
-                            </>
-                          )}
-
-                          {isUploading && !isPaused && (
-                            <>
-                              <button
-                                onClick={handlePauseUpload}
-                                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-600 text-white shadow-xs transition-colors"
-                              >
-                                <Pause className="w-3.5 h-3.5" />
-                                <span>Pause</span>
-                              </button>
-
-                              <button
-                                onClick={handleCancelUpload}
-                                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-slate-800 hover:bg-rose-700 text-white shadow-xs transition-colors"
-                                title="Safely stops remaining uploads without deleting already uploaded files"
-                              >
-                                <StopCircle className="w-3.5 h-3.5" />
-                                <span>Cancel</span>
-                              </button>
-                            </>
-                          )}
-
-                          {isPaused && (
-                            <>
-                              <button
-                                onClick={handleResumeUpload}
-                                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs transition-colors"
-                              >
-                                <Play className="w-3.5 h-3.5 fill-current" />
-                                <span>Resume</span>
-                              </button>
-
-                              <button
-                                onClick={handleCancelUpload}
-                                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-slate-800 hover:bg-rose-700 text-white shadow-xs transition-colors"
-                              >
-                                <StopCircle className="w-3.5 h-3.5" />
-                                <span>Cancel</span>
-                              </button>
-                            </>
-                          )}
-                        </div>
+                  {/* Progress Bar (Identical to Super Admin Drive Studio) */}
+                  {isUploading && (
+                    <div className="p-3.5 rounded-xl bg-red-50 border border-red-200 space-y-2">
+                      <div className="flex items-center justify-between text-xs font-bold text-red-950">
+                        <span className="flex items-center gap-1.5">
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin text-red-600" />
+                          <span>File {currentFileIndex + 1} of {selectedFiles.length} ({currentFileProgress}%)</span>
+                        </span>
+                        <span>{overallProgress}%</span>
                       </div>
-
-                      {/* 5-Metric Counter Status Grid */}
-                      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 p-3 rounded-xl bg-slate-50 border border-slate-200/90 text-xs">
-                        <div className="p-2.5 rounded-lg bg-white border border-slate-200">
-                          <span className="text-[10px] uppercase font-bold text-slate-500 block">Total Files</span>
-                          <span className="text-base font-extrabold text-slate-900">{totalCount}</span>
-                        </div>
-                        <div className="p-2.5 rounded-lg bg-white border border-slate-200">
-                          <span className="text-[10px] uppercase font-bold text-emerald-600 block">Completed</span>
-                          <span className="text-base font-extrabold text-emerald-700">{completedCount}</span>
-                        </div>
-                        <div className="p-2.5 rounded-lg bg-white border border-slate-200 col-span-2 sm:col-span-1">
-                          <span className="text-[10px] uppercase font-bold text-blue-600 block">Current File</span>
-                          <span className="text-xs font-bold text-slate-800 truncate block mt-0.5" title={currentFileName || 'None'}>
-                            {currentFileIndex >= 0 ? `#${currentFileIndex + 1}: ${currentFileName}` : (isUploading ? 'Preparing...' : '—')}
-                          </span>
-                        </div>
-                        <div className="p-2.5 rounded-lg bg-white border border-slate-200">
-                          <span className="text-[10px] uppercase font-bold text-amber-600 block">Remaining</span>
-                          <span className="text-base font-extrabold text-amber-700">{remainingCount}</span>
-                        </div>
-                        <div className="p-2.5 rounded-lg bg-white border border-slate-200">
-                          <span className="text-[10px] uppercase font-bold text-red-600 block">Failed</span>
-                          <span className="text-base font-extrabold text-red-700">{failedCount}</span>
-                        </div>
+                      <div className="w-full h-2 rounded-full bg-red-200 overflow-hidden">
+                        <div
+                          className="h-full bg-red-600 transition-all duration-200"
+                          style={{ width: `${overallProgress}%` }}
+                        />
                       </div>
+                      <div className="flex items-center justify-between pt-1 text-xs">
+                        <span className="text-[11px] text-red-700 font-mono truncate max-w-xs sm:max-w-md">
+                          {selectedFiles[currentFileIndex]?.name}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={handleCancelUpload}
+                          className="text-xs font-bold text-rose-700 hover:text-rose-900 underline cursor-pointer"
+                        >
+                          Cancel Upload
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
-                      {/* File Items Grid */}
-                      <div className="space-y-2.5 max-h-96 overflow-y-auto pr-1">
-                        {uploadFiles.map((item, itemIdx) => (
-                          <div
-                            key={item.id}
-                            className={`p-3 rounded-xl border flex flex-col gap-2 transition-all ${
-                              item.status === 'COMPLETED'
-                                ? 'bg-emerald-50/50 border-emerald-200'
-                                : item.status === 'UPLOADING' || item.status === 'REGISTERING' || item.status === 'VERIFYING'
-                                ? 'bg-blue-50/50 border-blue-200 shadow-2xs'
-                                : item.status === 'REGISTRATION_FAILED'
-                                ? 'bg-amber-50/40 border-amber-200'
-                                : item.status === 'FAILED'
-                                ? 'bg-red-50/50 border-red-200'
-                                : 'bg-white border-slate-200/90'
-                            }`}
-                          >
-                            <div className="flex items-center justify-between gap-3">
-                              <div className="flex items-center gap-3 min-w-0">
-                                <span className="text-[10px] font-mono font-bold text-slate-400 w-5 shrink-0">
-                                  #{itemIdx + 1}
-                                </span>
-
-                                {item.previewUrl ? (
-                                  <img
-                                    src={item.previewUrl}
-                                    alt={item.file.name}
-                                    className="w-10 h-10 rounded-lg object-cover border border-slate-200 shrink-0"
-                                  />
-                                ) : (
-                                  <div className="w-10 h-10 rounded-lg bg-slate-100 flex items-center justify-center text-slate-400 shrink-0">
-                                    {item.mediaType.includes('VIDEO') ? <Film className="w-5 h-5 text-red-500" /> : <Camera className="w-5 h-5" />}
-                                  </div>
-                                )}
-
-                                <div className="min-w-0">
-                                  <p className="text-xs font-bold text-slate-900 truncate max-w-xs sm:max-w-md">
-                                    {item.file.name}
-                                  </p>
-                                  <div className="flex items-center gap-2 text-[11px] text-slate-500 mt-0.5">
-                                    <span>{formatFileSize(item.file.size)}</span>
-                                    {item.isOptimized && (
-                                      <span className="font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200 text-[10px]">
-                                        -{item.reductionPercent}% optimized ⚡
-                                      </span>
-                                    )}
-                                    <span>• {item.mediaType}</span>
-                                    {item.driveFileId && (
-                                      <span className="font-mono text-[9px] text-slate-400 truncate max-w-[100px]" title={item.driveFileId}>
-                                        ID: {item.driveFileId}
-                                      </span>
-                                    )}
-                                  </div>
-                                </div>
-                              </div>
-
-                              <div className="flex items-center gap-2 shrink-0">
-                                {item.status === 'COMPLETED' ? (
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-xs font-bold text-emerald-700 flex items-center gap-1">
-                                      <CheckCircle className="w-4 h-4 text-emerald-600" /> Synced
-                                    </span>
-                                    {item.driveWebUrl && (
-                                      <a
-                                        href={item.driveWebUrl}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        className="text-[11px] font-bold text-red-600 hover:underline flex items-center gap-0.5"
-                                      >
-                                        <span>Drive</span>
-                                        <ExternalLink className="w-3 h-3" />
-                                      </a>
-                                    )}
-                                  </div>
-                                ) : item.status === 'UPLOADING' ? (
-                                  <div className="flex flex-col items-end gap-0.5">
-                                    <div className="flex items-center gap-1.5 text-xs font-bold text-blue-600">
-                                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                                      <span>{item.progress}%</span>
-                                      {item.speedBytesPerSec && item.speedBytesPerSec > 0 && (
-                                        <span className="text-[10px] font-semibold text-slate-600 bg-slate-100 px-1.5 py-0.2 rounded">
-                                          {formatSpeed(item.speedBytesPerSec)}
-                                        </span>
-                                      )}
-                                    </div>
-                                    {item.loadedBytes !== undefined && (
-                                      <span className="text-[10px] text-slate-500 font-mono">
-                                        {formatFileSize(item.loadedBytes)} / {formatFileSize(item.totalBytes || item.file.size)}
-                                      </span>
-                                    )}
-                                  </div>
-                                ) : item.status === 'REGISTERING' || item.status === 'VERIFYING' ? (
-                                  <span className="text-xs font-bold text-blue-600 flex items-center gap-1">
-                                    <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Verifying & Registering...
-                                  </span>
-                                ) : item.status === 'REGISTRATION_FAILED' ? (
-                                  <div className="flex flex-col items-end">
-                                    <span className="text-xs font-bold text-amber-700 flex items-center gap-1">
-                                      <AlertTriangle className="w-4 h-4 text-amber-500" /> In Drive (Registration Pending)
-                                    </span>
-                                  </div>
-                                ) : item.status === 'FAILED' ? (
-                                  <span className="text-xs font-bold text-red-600 flex items-center gap-1">
-                                    <AlertCircle className="w-4 h-4" /> Failed
-                                  </span>
-                                ) : item.status === 'OPTIMIZING' ? (
-                                  <span className="text-[11px] font-semibold text-amber-700 flex items-center gap-1">
-                                    <Sparkles className="w-3.5 h-3.5 animate-pulse" /> Compressing...
-                                  </span>
-                                ) : (
-                                  <button
-                                    onClick={() => handleRemoveQueuedFile(item.id)}
-                                    disabled={isUploading}
-                                    className="text-slate-400 hover:text-red-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
-                                  >
-                                    <Trash2 className="w-4 h-4" />
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-
-                            {/* Prominent Real Error Display */}
-                            {item.error && (
-                              <div className="p-2 rounded-lg bg-red-100/70 border border-red-200/90 text-xs text-red-800 flex items-start gap-2 font-mono">
-                                <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
-                                <div className="min-w-0 flex-1">
-                                  <span className="font-bold">Error: </span>
-                                  <span className="break-all">{item.error}</span>
-                                </div>
-                              </div>
-                            )}
-
-                            {/* Live Progress Bar */}
-                            {(item.status === 'UPLOADING' || item.status === 'REGISTERING') && (
-                              <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
-                                <div
-                                  className={`h-1.5 rounded-full transition-all duration-150 ${item.status === 'REGISTERING' ? 'bg-blue-600' : 'bg-red-600'}`}
-                                  style={{ width: `${item.progress}%` }}
-                                />
-                              </div>
+                  {/* Success Banner (Identical to Super Admin Drive Studio) */}
+                  {successResults.length > 0 && (
+                    <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 space-y-2">
+                      <div className="flex items-center justify-between text-xs font-bold text-emerald-950">
+                        <span className="flex items-center gap-1.5">
+                          <CheckCircle className="w-4 h-4 text-emerald-600" />
+                          <span>Uploaded {successResults.length} files successfully!</span>
+                        </span>
+                      </div>
+                      <div className="max-h-36 overflow-y-auto space-y-1">
+                        {successResults.map((r, i) => (
+                          <div key={i} className="flex items-center justify-between text-xs bg-white/80 p-2 rounded-lg border border-emerald-100">
+                            <span className="font-bold text-slate-800 truncate mr-2">✓ {r.name}</span>
+                            {r.url && (
+                              <a href={r.url} target="_blank" rel="noreferrer" className="text-red-600 hover:underline font-bold inline-flex items-center gap-1 shrink-0">
+                                <span>Drive</span>
+                                <ExternalLink className="w-3 h-3" />
+                              </a>
                             )}
                           </div>
                         ))}
                       </div>
+                    </div>
+                  )}
+
+                  {/* Error Notification */}
+                  {uploadErrorMessage && (
+                    <div className="p-3.5 rounded-xl bg-red-50 border border-red-200 text-xs text-red-800 flex items-start justify-between gap-2">
+                      <div className="flex items-start gap-2">
+                        <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                        <div>
+                          <span className="font-bold">Error: </span>
+                          <span>{uploadErrorMessage}</span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setUploadErrorMessage('')}
+                        className="text-red-500 hover:text-red-800 font-bold shrink-0 cursor-pointer"
+                      >
+                        Dismiss
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Actions */}
+                  {selectedFiles.length > 0 && (
+                    <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                      <button
+                        type="button"
+                        onClick={handleClearAll}
+                        disabled={isUploading}
+                        className="px-4 py-2.5 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 disabled:opacity-50 transition-colors cursor-pointer"
+                      >
+                        Clear All
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleExecuteUpload}
+                        disabled={isUploading || selectedFiles.length === 0}
+                        className="px-6 py-2.5 rounded-xl text-xs font-bold bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 disabled:opacity-50 text-white shadow-xs transition-all flex items-center gap-2 cursor-pointer"
+                      >
+                        {isUploading ? (
+                          <>
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                            <span>Uploading to Drive ({currentFileIndex + 1}/{selectedFiles.length})...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Upload className="w-3.5 h-3.5" />
+                            <span>Start Upload ({selectedFiles.length} Files)</span>
+                          </>
+                        )}
+                      </button>
                     </div>
                   )}
                 </div>
