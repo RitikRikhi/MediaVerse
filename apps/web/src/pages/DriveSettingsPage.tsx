@@ -188,8 +188,10 @@ export const DriveSettingsPage: React.FC = () => {
   };
 
   useEffect(() => {
-    loadData();
-  }, []);
+    if (hasAdminAccess) {
+      loadData();
+    }
+  }, [hasAdminAccess, activeTab]);
 
   const handleSyncAll = async () => {
     if (!driveStatus?.isConnected) {

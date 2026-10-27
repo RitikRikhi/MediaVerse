@@ -2,6 +2,7 @@ import { config } from '../config';
 import { db } from '../db/memoryStore';
 import { MediaFolder, PersonalDriveInfo, PersonalSubfolder, UserRole, MemberDrive, DriveGrantedPermission } from '@mediaverse/shared-types';
 import { SupabaseService } from './supabaseService';
+import { AuthService } from './authService';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
@@ -2637,7 +2638,121 @@ export class DriveService {
     }
   }
 
+  static getSpecializationLabel(role: UserRole | string): string {
+    return role === 'PHOTOGRAPHER'
+      ? 'Photography (RAW Photos & Stills Only)'
+      : role === 'VIDEOGRAPHER' || (role as string) === 'VLOGGER'
+      ? 'Videography & Vlogging (4K Footage & BTS)'
+      : role === 'VIDEO_EDITOR'
+      ? 'Video Editing & Deliverables'
+      : role === 'MEDIA_COORDINATOR'
+      ? 'Media Coordination & Lead'
+      : role === 'SUPER_ADMIN'
+      ? 'Super Admin Festival Command'
+      : `${role} Drive`;
+  }
+
   static getAllMemberDrives(): MemberDrive[] {
+    // 1. Reload from disk if in-memory list is empty
+    if (this.memberDrives.length === 0) {
+      this.loadMemberDrivesFromDisk();
+    }
+
+    // 2. Synchronize all registered user profiles from AuthService & db.profiles
+    const registeredProfiles = AuthService.getAllRegisteredProfiles();
+    const allProfiles = [...db.profiles, ...registeredProfiles];
+    const demoEmails = [
+      'photographer@dsa.cgc.edu.in',
+      'videographer@dsa.cgc.edu.in',
+      'editor@dsa.cgc.edu.in',
+      'coordinator@dsa.cgc.edu.in',
+      'karan.photo@dsa.cgc.edu.in'
+    ];
+
+    for (const p of allProfiles) {
+      if (!p || !p.email) continue;
+      const cleanEmail = p.email.trim().toLowerCase();
+      if (demoEmails.includes(cleanEmail)) continue;
+
+      // Check if user already exists in this.memberDrives
+      const existingDrive = this.memberDrives.find(
+        m => m.memberEmail.toLowerCase() === cleanEmail
+      );
+
+      if (!existingDrive) {
+        const role = p.roles && p.roles.length > 0 ? p.roles[0] : 'PHOTOGRAPHER';
+        const templates = this.getPersonalDriveTemplates(role);
+
+        // Check if there are existing folder records in db.mediaFolders
+        const personalRoot = db.mediaFolders.find(
+          f => (f.user_id === p.id || f.user_name === p.full_name) && f.is_personal && (!f.parent_folder_id || f.parent_folder_id === '')
+        );
+
+        const subRecords = personalRoot
+          ? db.mediaFolders.filter(f => f.parent_folder_id === personalRoot.id)
+          : [];
+
+        const subfolders: PersonalSubfolder[] = subRecords.length > 0
+          ? subRecords.map(s => ({
+              id: s.id,
+              name: s.folder_name,
+              path: s.folder_path,
+              driveFolderId: s.drive_folder_id,
+              driveWebUrl: s.drive_web_url,
+              isDefault: s.is_system_created,
+              created_at: s.created_at
+            }))
+          : templates.map(name => ({
+              id: `sub-${crypto.randomUUID().slice(0, 8)}`,
+              name,
+              path: `SAVISKAR 2026 / Crew Personal Drives / ${p.full_name} (${role}) / ${name}`,
+              driveFolderId: `sub-${crypto.randomUUID().slice(0, 8)}`,
+              driveWebUrl: `https://drive.google.com/drive/folders/1PNvblS0BffXR12av3dC7fP7wNdf948kO`,
+              isDefault: true,
+              created_at: new Date().toISOString()
+            }));
+
+        const rootDriveId = personalRoot?.drive_folder_id || `user-drive-${p.id}`;
+        const newDrive: MemberDrive = {
+          id: `member-${p.id}`,
+          memberEmail: cleanEmail,
+          memberName: p.full_name,
+          role,
+          specializationLabel: this.getSpecializationLabel(role),
+          driveFolderId: rootDriveId,
+          driveWebUrl: personalRoot?.drive_web_url || `https://drive.google.com/drive/folders/${rootDriveId}`,
+          drivePath: personalRoot?.folder_path || `SAVISKAR 2026 / Crew Personal Drives / ${p.full_name} (${role})`,
+          sharedWithEmail: cleanEmail,
+          accessLevel: 'writer',
+          grantedPermissions: [],
+          createdAt: p.created_at || new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          subfolders,
+          tree: {
+            id: p.id,
+            name: `${p.full_name} (${role})`,
+            driveFolderId: rootDriveId,
+            driveWebUrl: personalRoot?.drive_web_url || `https://drive.google.com/drive/folders/${rootDriveId}`,
+            path: personalRoot?.folder_path || `SAVISKAR 2026 / Crew Personal Drives / ${p.full_name} (${role})`,
+            children: subfolders.map(s => ({
+              id: s.id,
+              name: s.name,
+              driveFolderId: s.driveFolderId,
+              driveWebUrl: s.driveWebUrl,
+              path: s.path,
+              children: []
+            }))
+          }
+        };
+
+        this.memberDrives.push(newDrive);
+      }
+    }
+
+    if (this.memberDrives.length > 0) {
+      this.saveMemberDrivesToDisk();
+    }
+
     return this.memberDrives;
   }
 

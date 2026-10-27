@@ -141,6 +141,10 @@ export class AuthService {
     return db.profiles.find(p => p.id === id) || this.registeredProfiles.find(p => p.id === id);
   }
 
+  static getAllRegisteredProfiles(): UserProfile[] {
+    return this.registeredProfiles;
+  }
+
   static hashPassword(password: string, salt: string): string {
     return crypto.pbkdf2Sync(password, salt, 10000, 64, 'sha512').toString('hex');
   }
