@@ -40,7 +40,9 @@ import {
   Pause,
   Play,
   StopCircle,
-  XCircle
+  XCircle,
+  Smartphone,
+  CheckCircle2
 } from 'lucide-react';
 
 interface QueuedFile {
@@ -927,6 +929,42 @@ export const FieldCrewPortalPage: React.FC = () => {
                       onClose={() => setShowPersonalDriveDrawer(false)}
                     />
                   )}
+
+                  {/* 1-Minute Quick Guide for Mobile/PC Direct Data Transfer */}
+                  <div className="p-3.5 rounded-2xl bg-gradient-to-r from-red-50 via-rose-50 to-orange-50 border border-red-200/90 shadow-2xs space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-red-900 flex items-center gap-1.5">
+                        <Zap className="w-4 h-4 text-red-600 shrink-0" />
+                        <span>⚡ 1-Minute Event Guide: How to Transfer Media from Phone / PC</span>
+                      </span>
+                      <span className="px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-red-600 text-white uppercase tracking-wider">
+                        Quick Transfer
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-slate-700">
+                      <div className="p-2.5 rounded-xl bg-white border border-red-100/80 shadow-2xs flex items-start gap-2">
+                        <span className="w-5 h-5 rounded-full bg-red-100 text-red-700 flex items-center justify-center text-[10px] font-extrabold shrink-0 mt-0.5">1</span>
+                        <div>
+                          <p className="text-xs font-bold text-slate-900">Tap Dropzone Below</p>
+                          <p className="text-[10px] text-slate-500 leading-tight">Pick 1 to 100+ photos/videos from your mobile camera roll or computer SD card.</p>
+                        </div>
+                      </div>
+                      <div className="p-2.5 rounded-xl bg-white border border-red-100/80 shadow-2xs flex items-start gap-2">
+                        <span className="w-5 h-5 rounded-full bg-red-100 text-red-700 flex items-center justify-center text-[10px] font-extrabold shrink-0 mt-0.5">2</span>
+                        <div>
+                          <p className="text-xs font-bold text-slate-900">Hit 'Start Upload'</p>
+                          <p className="text-[10px] text-slate-500 leading-tight">Your media streams directly into the official Google Drive folder in real time.</p>
+                        </div>
+                      </div>
+                      <div className="p-2.5 rounded-xl bg-white border border-red-100/80 shadow-2xs flex items-start gap-2">
+                        <span className="w-5 h-5 rounded-full bg-red-100 text-red-700 flex items-center justify-center text-[10px] font-extrabold shrink-0 mt-0.5">3</span>
+                        <div>
+                          <p className="text-xs font-bold text-slate-900">Instant Drive Link</p>
+                          <p className="text-[10px] text-slate-500 leading-tight">Every uploaded file gives you a clickable link to view it instantly in Google Drive.</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
 
                   {/* Drag & Drop Upload Card */}
                   <div

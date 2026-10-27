@@ -17,7 +17,13 @@ import {
   Mail,
   User,
   Phone,
-  Check
+  Check,
+  Cloud,
+  Zap,
+  HardDrive,
+  Smartphone,
+  CheckCircle2,
+  ArrowRight
 } from 'lucide-react';
 
 interface AuthModalProps {
@@ -167,10 +173,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
         role: regRole,
         phone: regPhone.trim() || '+91 9876543210'
       });
-      setSuccessMsg(`Welcome to SAVISKAR 2026, ${cleanName}! Account created and signed in.`);
+      setSuccessMsg(`🎉 Welcome to SAVISKAR 2026, ${cleanName}! Your Google Drive access is active for ${cleanEmail}. Entering workspace...`);
       setTimeout(() => {
         onClose();
-      }, 600);
+      }, 900);
     } catch (err: any) {
       setErrorMsg(err.message || 'Registration failed. Please check inputs.');
     } finally {
@@ -331,51 +337,142 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
           </div>
         ) : (
           /* Tab 2: Register New Crew Member */
-          <form onSubmit={handleRegisterSubmit} className="space-y-3.5">
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <label className="text-xs font-bold text-slate-700">Full Name *</label>
-                {touched.name && !isRegNameValid && (
-                  <span className="text-[10px] font-semibold text-rose-600">At least 2 characters required</span>
-                )}
+          <div className="space-y-3.5">
+            {/* 1-Minute Quick Guide: How Google Drive & Data Transfer Works */}
+            <div className="p-3 rounded-2xl bg-gradient-to-r from-red-50 via-rose-50 to-orange-50 border border-red-200/90 shadow-2xs space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-red-900 flex items-center gap-1.5">
+                  <Cloud className="w-4 h-4 text-red-600 shrink-0" />
+                  <span>⚡ 1-Minute Quick Guide: How Your Drive & Data Transfer Works</span>
+                </span>
+                <span className="px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-red-600 text-white uppercase tracking-wider">
+                  Tomorrow Ready
+                </span>
               </div>
-              <div className="relative">
-                <User className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-                <input
-                  type="text"
-                  value={regName}
-                  onBlur={() => setTouched(prev => ({ ...prev, name: true }))}
-                  onChange={e => setRegName(e.target.value)}
-                  placeholder="e.g. Aarav Sharma"
-                  required
-                  className={`w-full pl-9 pr-3.5 py-2 rounded-xl bg-slate-50 border text-xs text-slate-900 focus:outline-none transition-colors ${
-                    touched.name && !isRegNameValid
-                      ? 'border-rose-400 focus:border-rose-500 bg-rose-50/30'
-                      : 'border-slate-200 focus:border-red-500'
-                  }`}
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-slate-700">
+                <div className="p-2 rounded-xl bg-white border border-red-100/80 shadow-2xs flex flex-col justify-between">
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-slate-900 mb-1">
+                    <span className="w-5 h-5 rounded-full bg-red-100 text-red-700 flex items-center justify-center text-[10px] font-extrabold shrink-0">1</span>
+                    <span>Enter Gmail ID</span>
+                  </div>
+                  <p className="text-[10px] text-slate-500 leading-tight">
+                    Your Gmail is instantly granted cloud access to the festival's official Google Drive folder structure.
+                  </p>
+                </div>
+                <div className="p-2 rounded-xl bg-white border border-red-100/80 shadow-2xs flex flex-col justify-between">
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-slate-900 mb-1">
+                    <span className="w-5 h-5 rounded-full bg-red-100 text-red-700 flex items-center justify-center text-[10px] font-extrabold shrink-0">2</span>
+                    <span>Pick From Phone / PC</span>
+                  </div>
+                  <p className="text-[10px] text-slate-500 leading-tight">
+                    Select 10, 50, or 100+ RAW photos or 4K videos directly from your mobile camera roll or SD card.
+                  </p>
+                </div>
+                <div className="p-2 rounded-xl bg-white border border-red-100/80 shadow-2xs flex flex-col justify-between">
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-slate-900 mb-1">
+                    <span className="w-5 h-5 rounded-full bg-red-100 text-red-700 flex items-center justify-center text-[10px] font-extrabold shrink-0">3</span>
+                    <span>1-Tap Start Upload</span>
+                  </div>
+                  <p className="text-[10px] text-slate-500 leading-tight">
+                    Files stream straight into your assigned Google Drive event folder. Zero manual sharing or Drive app needed!
+                  </p>
+                </div>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <form onSubmit={handleRegisterSubmit} className="space-y-3">
               <div>
                 <div className="flex items-center justify-between mb-1">
-                  <label className="text-xs font-bold text-slate-700">Email Address *</label>
-                  {touched.email && !isRegEmailValid && (
-                    <span className="text-[10px] font-semibold text-rose-600">Invalid email</span>
+                  <label className="text-xs font-bold text-slate-700">Full Name *</label>
+                  {touched.name && !isRegNameValid && (
+                    <span className="text-[10px] font-semibold text-rose-600">At least 2 characters required</span>
                   )}
                 </div>
                 <div className="relative">
-                  <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                  <User className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
                   <input
-                    type="email"
-                    value={regEmail}
-                    onBlur={() => setTouched(prev => ({ ...prev, email: true }))}
-                    onChange={e => setRegEmail(e.target.value)}
-                    placeholder="e.g. aarav@gmail.com"
+                    type="text"
+                    value={regName}
+                    onBlur={() => setTouched(prev => ({ ...prev, name: true }))}
+                    onChange={e => setRegName(e.target.value)}
+                    placeholder="e.g. Aarav Sharma"
                     required
                     className={`w-full pl-9 pr-3.5 py-2 rounded-xl bg-slate-50 border text-xs text-slate-900 focus:outline-none transition-colors ${
-                      touched.email && !isRegEmailValid
+                      touched.name && !isRegNameValid
+                        ? 'border-rose-400 focus:border-rose-500 bg-rose-50/30'
+                        : 'border-slate-200 focus:border-red-500'
+                    }`}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-bold text-slate-700">Gmail Address *</label>
+                    {touched.email && !isRegEmailValid && (
+                      <span className="text-[10px] font-semibold text-rose-600">Invalid email</span>
+                    )}
+                  </div>
+                  <div className="relative">
+                    <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                    <input
+                      type="email"
+                      value={regEmail}
+                      onBlur={() => setTouched(prev => ({ ...prev, email: true }))}
+                      onChange={e => setRegEmail(e.target.value)}
+                      placeholder="e.g. yourname@gmail.com"
+                      required
+                      className={`w-full pl-9 pr-3.5 py-2 rounded-xl bg-slate-50 border text-xs text-slate-900 focus:outline-none transition-colors ${
+                        touched.email && !isRegEmailValid
+                          ? 'border-rose-400 focus:border-rose-500 bg-rose-50/30'
+                          : 'border-slate-200 focus:border-red-500'
+                      }`}
+                    />
+                  </div>
+                  <p className="text-[10px] text-slate-400 mt-1">
+                    🔒 Automatically linked to your SAVISKAR 2026 Google Drive.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Phone / WhatsApp
+                  </label>
+                  <div className="relative">
+                    <Phone className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                    <input
+                      type="text"
+                      value={regPhone}
+                      onChange={e => setRegPhone(e.target.value)}
+                      placeholder="+91 9876543210"
+                      className="w-full pl-9 pr-3.5 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-900 focus:outline-none focus:border-red-500"
+                    />
+                  </div>
+                  <p className="text-[10px] text-slate-400 mt-1">
+                    Used for event-day emergency crew alerts.
+                  </p>
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-bold text-slate-700">Create Password *</label>
+                  <span className={`text-[10px] font-semibold ${regPassword.length >= 6 ? 'text-emerald-600' : 'text-slate-400'}`}>
+                    {regPassword.length >= 6 ? '✓ 6+ characters' : 'Min 6 characters'}
+                  </span>
+                </div>
+                <div className="relative">
+                  <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                  <input
+                    type="password"
+                    value={regPassword}
+                    onBlur={() => setTouched(prev => ({ ...prev, password: true }))}
+                    onChange={e => setRegPassword(e.target.value)}
+                    placeholder="At least 6 characters"
+                    required
+                    className={`w-full pl-9 pr-3.5 py-2 rounded-xl bg-slate-50 border text-xs text-slate-900 focus:outline-none transition-colors ${
+                      touched.password && !isRegPasswordValid
                         ? 'border-rose-400 focus:border-rose-500 bg-rose-50/30'
                         : 'border-slate-200 focus:border-red-500'
                     }`}
@@ -385,78 +482,40 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Phone / WhatsApp
+                  Crew Role (Auto-configures your Drive Folder) *
                 </label>
-                <div className="relative">
-                  <Phone className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-                  <input
-                    type="text"
-                    value={regPhone}
-                    onChange={e => setRegPhone(e.target.value)}
-                    placeholder="+91 9876543210"
-                    className="w-full pl-9 pr-3.5 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-900 focus:outline-none focus:border-red-500"
-                  />
-                </div>
+                <select
+                  value={regRole}
+                  onChange={e => setRegRole(e.target.value as UserRole)}
+                  className="w-full px-3.5 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs font-semibold text-slate-900 focus:outline-none focus:border-red-500"
+                >
+                  <option value="SUPER_ADMIN">👑 Super Admin — Full master access & Drive Studio control</option>
+                  <option value="MEDIA_COORDINATOR">🛡️ Admin (Media Coordinator) — Crew lead, operations & assignments</option>
+                  <option value="PHOTOGRAPHER">📸 Photographer — Photo coverage & RAW uploads</option>
+                  <option value="VIDEOGRAPHER">🎥 Videographer — 4K video clips & camera stems</option>
+                  <option value="VIDEO_EDITOR">🎬 Video Editor — Reels, edits & assembly drafts</option>
+                  <option value="REVIEWER">🔍 Reviewer — QC, approval & feedback</option>
+                  <option value="PRESIDENT">🎓 President / Leadership — Executive festival oversight</option>
+                </select>
               </div>
-            </div>
 
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <label className="text-xs font-bold text-slate-700">Create Password *</label>
-                <span className={`text-[10px] font-semibold ${regPassword.length >= 6 ? 'text-emerald-600' : 'text-slate-400'}`}>
-                  {regPassword.length >= 6 ? '✓ 6+ characters' : 'Min 6 characters'}
+              <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200/80 text-[11px] text-slate-600 flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>
+                  Everything sets up in under <strong>60 seconds</strong>. All uploaded media will automatically carry your name and timestamp in Google Drive.
                 </span>
               </div>
-              <div className="relative">
-                <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-                <input
-                  type="password"
-                  value={regPassword}
-                  onBlur={() => setTouched(prev => ({ ...prev, password: true }))}
-                  onChange={e => setRegPassword(e.target.value)}
-                  placeholder="At least 6 characters"
-                  required
-                  className={`w-full pl-9 pr-3.5 py-2 rounded-xl bg-slate-50 border text-xs text-slate-900 focus:outline-none transition-colors ${
-                    touched.password && !isRegPasswordValid
-                      ? 'border-rose-400 focus:border-rose-500 bg-rose-50/30'
-                      : 'border-slate-200 focus:border-red-500'
-                  }`}
-                />
-              </div>
-            </div>
 
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">
-                Crew Role *
-              </label>
-              <select
-                value={regRole}
-                onChange={e => setRegRole(e.target.value as UserRole)}
-                className="w-full px-3.5 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs font-semibold text-slate-900 focus:outline-none focus:border-red-500"
+              <button
+                type="submit"
+                disabled={isLoading || !isFormValid}
+                className="w-full py-2.5 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white shadow-xs transition-colors flex items-center justify-center gap-1.5"
               >
-                <option value="SUPER_ADMIN">👑 Super Admin — Full master access & Drive Studio control</option>
-                <option value="MEDIA_COORDINATOR">🛡️ Admin (Media Coordinator) — Crew lead, operations & assignments</option>
-                <option value="PHOTOGRAPHER">📸 Photographer — Photo coverage & RAW uploads</option>
-                <option value="VIDEOGRAPHER">🎥 Videographer — 4K video clips & camera stems</option>
-                <option value="VIDEO_EDITOR">🎬 Video Editor — Reels, edits & assembly drafts</option>
-                <option value="REVIEWER">🔍 Reviewer — QC, approval & feedback</option>
-                <option value="PRESIDENT">🎓 President / Leadership — Executive festival oversight</option>
-              </select>
-            </div>
-
-            <p className="text-[11px] text-slate-500">
-              Works with any Gmail address. Your account is immediately activated and all photos/videos you upload will be credited to you.
-            </p>
-
-            <button
-              type="submit"
-              disabled={isLoading || !isFormValid}
-              className="w-full py-2.5 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white shadow-xs transition-colors flex items-center justify-center gap-1.5"
-            >
-              <UserCheck className="w-4 h-4" />
-              <span>{isLoading ? 'Creating Account...' : 'Register & Enter Workspace'}</span>
-            </button>
-          </form>
+                <UserCheck className="w-4 h-4" />
+                <span>{isLoading ? 'Setting up your Drive workspace...' : 'Register & Start Uploading (1-Min Setup)'}</span>
+              </button>
+            </form>
+          </div>
         )}
       </div>
     </Modal>
