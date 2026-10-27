@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { Assignment, ShotChecklistItem, MediaType, MediaAsset, PersonalDriveInfo, PersonalSubfolder } from '../types';
@@ -101,7 +102,7 @@ export const FieldCrewPortalPage: React.FC = () => {
   const [personalDrive, setPersonalDrive] = useState<PersonalDriveInfo | null>(null);
   const [personalDriveLoading, setPersonalDriveLoading] = useState<boolean>(false);
   const [destinationMode, setDestinationMode] = useState<'OFFICIAL' | 'PERSONAL'>('OFFICIAL');
-  const [showPersonalDriveDrawer, setShowPersonalDriveDrawer] = useState<boolean>(false);
+  const [showPersonalDriveDrawer, setShowPersonalDriveDrawer] = useState<boolean>(true);
   const [newSubfolderName, setNewSubfolderName] = useState<string>('');
   const [isCreatingSubfolder, setIsCreatingSubfolder] = useState<boolean>(false);
   const [editingSubfolderId, setEditingSubfolderId] = useState<string | null>(null);
@@ -903,28 +904,38 @@ export const FieldCrewPortalPage: React.FC = () => {
                       )}
                     </div>
 
-                    <div className="flex items-center gap-3 shrink-0">
+                    <div className="flex items-center gap-2.5 flex-wrap shrink-0">
+                      {/* Super Admin Console Shortcut */}
+                      <Link
+                        to="/drive"
+                        className="px-3.5 py-2.5 rounded-xl text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white shadow-2xs transition-colors flex items-center gap-1.5"
+                        title="Manage Member Gmail Drives & Transfer Data"
+                      >
+                        <HardDrive className="w-4 h-4 text-red-500" />
+                        <span>Drives & Transfer Studio &rarr;</span>
+                      </Link>
+
                       {/* Open in Drive button */}
                       {(selectedFolderId || destinationFolderInfo?.driveFolderId) && (
                         <a
                           href={`https://drive.google.com/drive/folders/${selectedFolderId || destinationFolderInfo?.driveFolderId}`}
                           target="_blank"
                           rel="noreferrer"
-                          className="px-4 py-2.5 rounded-xl text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 transition-colors flex items-center gap-2"
+                          className="px-3.5 py-2.5 rounded-xl text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 transition-colors flex items-center gap-1.5"
                           title="Open this folder in Google Drive"
                         >
                           <span>Open in Drive</span>
-                          <ExternalLink className="w-4 h-4 text-slate-400" />
+                          <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
                         </a>
                       )}
 
                       {/* Browse Tree / Setup Personal Drive button */}
                       <button
                         onClick={() => setShowPersonalDriveDrawer(!showPersonalDriveDrawer)}
-                        className="px-4 py-2.5 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-700 text-white shadow-2xs transition-colors flex items-center gap-2"
+                        className="px-3.5 py-2.5 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-700 text-white shadow-2xs transition-colors flex items-center gap-1.5"
                       >
                         <FolderPlus className="w-4 h-4" />
-                        <span>{showPersonalDriveDrawer ? 'Close Folder Tree' : 'Change Target / My Drive'}</span>
+                        <span>{showPersonalDriveDrawer ? 'Hide Folder Tree' : 'Show Folder Tree'}</span>
                       </button>
                     </div>
                   </div>

@@ -89,9 +89,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
     },
     {
       to: '/drive',
-      label: 'Drive Settings',
+      label: 'Drive Studio',
       icon: HardDrive,
-      show: isCoordinator || isSuperAdmin
+      show: true,
+      badge: 'Admin / Drives'
     },
     {
       to: '/audit',
