@@ -34,7 +34,11 @@ import {
   FolderPlus,
   Edit2,
   Layers,
-  Plus
+  Plus,
+  Pause,
+  Play,
+  StopCircle,
+  XCircle
 } from 'lucide-react';
 
 interface QueuedFile {
@@ -87,12 +91,15 @@ export const FieldCrewPortalPage: React.FC = () => {
   // Day filter for left task list
   const [dayFilter, setDayFilter] = useState<'ALL' | 'DAY_1' | 'DAY_2'>('ALL');
 
-  // Turbo Event Compression Mode (On by default for high-speed event Wi-Fi uploads)
-  const [turboMode, setTurboMode] = useState<boolean>(true);
+  // Turbo Event Compression Mode (Off by default to preserve 100% original RAW and 4K video quality)
+  const [turboMode, setTurboMode] = useState<boolean>(false);
 
-  // Upload Queue State
+  // Upload Queue State & Sequential Batch Processing
   const [uploadFiles, setUploadFiles] = useState<QueuedFile[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+  const [currentFileIndex, setCurrentFileIndex] = useState<number>(-1);
+  const [currentFileName, setCurrentFileName] = useState<string>('');
   const [uploadSummaryMessage, setUploadSummaryMessage] = useState('');
   const [destinationFolderInfo, setDestinationFolderInfo] = useState<any>(null);
   const [driveFolders, setDriveFolders] = useState<any[]>([]);
@@ -116,7 +123,10 @@ export const FieldCrewPortalPage: React.FC = () => {
   const dropzoneRef = useRef<HTMLDivElement>(null);
   const uploadFilesRef = useRef<QueuedFile[]>([]);
   const isUploadingRef = useRef<boolean>(false);
-  const processingIdsRef = useRef<Set<string>>(new Set<string>());
+  const isPausedRef = useRef<boolean>(false);
+  const isCancelledRef = useRef<boolean>(false);
+  const pauseResolverRef = useRef<(() => void) | null>(null);
+  const activeAbortControllerRef = useRef<AbortController | null>(null);
   const itemProgressRef = useRef<Map<string, {
     progress: number;
     loadedBytes: number;
@@ -138,7 +148,12 @@ export const FieldCrewPortalPage: React.FC = () => {
       setMyAssignments(list);
 
       if (list.length > 0 && !selectedAssignment) {
-        await selectAssignment(list[0].id);
+        // Intelligently select first matching assignment according to user's active role
+        const targetCoverage = (activeRole === 'VIDEOGRAPHER' || isVideographer || roleMediaFilter === 'VIDEO')
+          ? 'VIDEOGRAPHY'
+          : 'PHOTOGRAPHY';
+        const matching = list.find(a => a.coverage_type === targetCoverage || a.coverage_type === 'HYBRID') || list[0];
+        await selectAssignment(matching.id);
       }
     } catch (err) {
       console.error('Failed to load assignments', err);
@@ -360,14 +375,41 @@ export const FieldCrewPortalPage: React.FC = () => {
     return `${mins}m ${secs < 10 ? '0' : ''}${secs}s`;
   };
 
+  // Check for fatal non-retryable errors (auth, permissions, storage quota, or cancellation)
+  const isNonRetryableError = (errorMsg: string): boolean => {
+    const lower = (errorMsg || '').toLowerCase();
+    return (
+      lower.includes('aborted') ||
+      lower.includes('cancelled') ||
+      lower.includes('401') ||
+      lower.includes('403') ||
+      lower.includes('unauthorized') ||
+      lower.includes('unauthenticated') ||
+      lower.includes('permission') ||
+      lower.includes('quota') ||
+      lower.includes('not connected') ||
+      lower.includes('drive sync offline')
+    );
+  };
+
   // Upload single file directly to Google Drive in 8 MiB chunks with auto-retry, offset resumption & idempotent registration
   const uploadSingleFileWithRetry = async (
     item: QueuedFile,
     assignment: Assignment,
+    signal?: AbortSignal,
     maxRetries = 2
   ): Promise<{ success: boolean; data?: any; error?: string; stage?: 'SESSION' | 'UPLOAD' | 'REGISTER'; driveFileId?: string; uploadUrl?: string }> => {
     let attempts = item.attemptCount || 0;
     while (attempts <= maxRetries) {
+      if (signal?.aborted) {
+        return {
+          success: false,
+          error: 'Upload cancelled by user',
+          driveFileId: item.driveFileId,
+          uploadUrl: item.uploadUrl
+        };
+      }
+
       try {
         attempts++;
         // Track current attempt count on item
@@ -375,7 +417,7 @@ export const FieldCrewPortalPage: React.FC = () => {
           prev.map(f => (f.id === item.id ? { ...f, attemptCount: attempts } : f))
         );
 
-        // Just-In-Time Turbo Mode optimization right before streaming this specific file
+        // Optional Turbo Mode optimization (user opted-in)
         let fileToUpload = item.file;
         if (turboMode && item.mediaType === 'RAW_PHOTO' && !item.isOptimized) {
           setUploadFiles(prev =>
@@ -410,6 +452,7 @@ export const FieldCrewPortalPage: React.FC = () => {
           uploadUrl: item.uploadUrl,
           queueItemId: item.id,
           attempt: attempts,
+          signal,
           onProgress: (prog) => {
             const now = Date.now();
             const tracked = itemProgressRef.current.get(item.id);
@@ -426,8 +469,7 @@ export const FieldCrewPortalPage: React.FC = () => {
               lastStateUpdate: (now - lastUpdate >= 250 || diffPct >= 5 || prog.percentage === 100) ? now : lastUpdate
             });
 
-            // Throttle React state re-renders to at most once per 250ms (or large progress step / completion)
-            // This prevents main thread CPU lockup from 60+ state dispatches per second across 100 files
+            // Throttle React state re-renders to at most once per 250ms
             if (now - lastUpdate >= 250 || diffPct >= 5 || prog.percentage === 100) {
               setUploadFiles(prev =>
                 prev.map(f =>
@@ -468,7 +510,17 @@ export const FieldCrewPortalPage: React.FC = () => {
           throw new Error(result.error || 'Direct Drive upload failed');
         }
       } catch (err: any) {
-        if (attempts > maxRetries) {
+        if (signal?.aborted) {
+          return {
+            success: false,
+            error: 'Upload cancelled by user',
+            driveFileId: item.driveFileId,
+            uploadUrl: item.uploadUrl
+          };
+        }
+
+        const isFatal = isNonRetryableError(err.message || '');
+        if (attempts > maxRetries || isFatal) {
           return {
             success: false,
             error: err.message || 'Upload failed after retries',
@@ -488,109 +540,169 @@ export const FieldCrewPortalPage: React.FC = () => {
     };
   };
 
-  // High-Speed Concurrent Upload Pipeline (Controlled 3 Parallel Streams)
+  // Robust Sequential Batch Processor: Exactly 1 file at a time automatically
   const handleStartUpload = async () => {
-    if (!selectedAssignment || uploadFiles.length === 0) return;
+    if (uploadFiles.length === 0) return;
 
     if (!driveStatus?.isConnected) {
       setUploadSummaryMessage('Error: Google Drive is not connected. Please connect Google Drive first.');
       return;
     }
 
-    // Synchronous mutex lock to eliminate double-clicks and concurrent worker triggers
+    // Intelligently fallback assignment if none is currently selected
+    let activeAssignment: Assignment = selectedAssignment!;
+    if (!activeAssignment) {
+      const targetCoverage = (activeRole === 'VIDEOGRAPHER' || isVideographer || roleMediaFilter === 'VIDEO')
+        ? 'VIDEOGRAPHY'
+        : 'PHOTOGRAPHY';
+      activeAssignment = myAssignments.find(a => a.coverage_type === targetCoverage || a.coverage_type === 'HYBRID') || myAssignments[0];
+    }
+    if (!activeAssignment) {
+      activeAssignment = {
+        id: 'general-field-upload',
+        event_id: 'event-saviskar-2026',
+        title: (activeRole === 'VIDEOGRAPHER' || roleMediaFilter === 'VIDEO') ? 'General Video Coverage' : 'General Photo Coverage',
+        notes: 'Auto-provisioned field coverage upload',
+        coverage_type: (activeRole === 'VIDEOGRAPHER' || roleMediaFilter === 'VIDEO') ? 'VIDEOGRAPHY' : 'PHOTOGRAPHY',
+        priority: 'MEDIUM',
+        status: 'CAPTURING',
+        day_session: 'DAY_1',
+        location_name: 'Main Campus',
+        start_time: new Date().toISOString(),
+        deadline: new Date().toISOString(),
+        created_by: 'system',
+        expected_deliverable: 'Event Media',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+    }
+
+    // Mutex lock to eliminate double clicks
     if (isUploadingRef.current) {
-      console.warn('[Queue] Upload batch already active, suppressing duplicate invocation.');
+      if (isPausedRef.current) {
+        handleResumeUpload();
+      }
       return;
     }
+
     isUploadingRef.current = true;
+    isPausedRef.current = false;
+    isCancelledRef.current = false;
     setIsUploading(true);
+    setIsPaused(false);
     setUploadSummaryMessage('');
 
     let completedCount = 0;
     let failedCount = 0;
 
     try {
-      // Get all pending items (QUEUED, FAILED, or REGISTRATION_FAILED) from the live reference
       const currentList = uploadFilesRef.current.length > 0 ? uploadFilesRef.current : uploadFiles;
-      const pendingList = currentList.filter(f => f.status === 'QUEUED' || f.status === 'FAILED' || f.status === 'REGISTRATION_FAILED');
-
-      if (pendingList.length === 0) {
-        return;
-      }
-
-      // Concurrency: 3 parallel streams provides optimal throughput without triggering Google Drive rate limits
-      const concurrency = Math.min(3, pendingList.length);
-
-      const worker = async () => {
-        while (true) {
-          // Atomically acquire next item not currently in-flight
-          let item: QueuedFile | null = null;
-          for (const candidate of pendingList) {
-            if (!processingIdsRef.current.has(candidate.id)) {
-              // Check current state from live ref to ensure completed items are never re-uploaded
-              const liveItem = uploadFilesRef.current.find(f => f.id === candidate.id) || candidate;
-              if (liveItem.status === 'COMPLETED') continue;
-
-              processingIdsRef.current.add(candidate.id);
-              item = liveItem;
-              break;
-            }
-          }
-
-          if (!item) break; // All pending items in this batch claimed!
-
-          try {
-            const res = await uploadSingleFileWithRetry(item, selectedAssignment);
-
-            if (res.success && res.data) {
-              completedCount++;
-              setUploadFiles(prev =>
-                prev.map(f =>
-                  f.id === item!.id
-                    ? {
-                        ...f,
-                        status: 'COMPLETED',
-                        progress: 100,
-                        driveFileId: res.driveFileId || f.driveFileId,
-                        driveWebUrl: res.data.asset?.drive_web_url,
-                        driveFolderUrl: res.data.destination?.driveFolderUrl
-                      }
-                    : f
-                )
-              );
-            } else {
-              failedCount++;
-              const isRegFail = Boolean(res.driveFileId) || res.stage === 'REGISTER';
-              setUploadFiles(prev =>
-                prev.map(f =>
-                  f.id === item!.id
-                    ? {
-                        ...f,
-                        status: isRegFail ? 'REGISTRATION_FAILED' : 'FAILED',
-                        driveFileId: res.driveFileId || f.driveFileId,
-                        uploadUrl: res.uploadUrl || f.uploadUrl,
-                        errorStage: res.stage,
-                        error: res.error || (isRegFail ? 'Drive upload succeeded but database registration failed.' : 'Upload failed')
-                      }
-                    : f
-                )
-              );
-            }
-          } finally {
-            processingIdsRef.current.delete(item.id);
-          }
+      
+      // Process one file at a time sequentially from top to bottom
+      for (let i = 0; i < currentList.length; i++) {
+        // 1. Cancellation check
+        if (isCancelledRef.current) {
+          console.log('[Sequential Processor] Upload batch cancelled.');
+          break;
         }
-      };
 
-      const workers = [];
-      for (let i = 0; i < concurrency; i++) {
-        workers.push(worker());
+        // 2. Pause check
+        if (isPausedRef.current) {
+          console.log('[Sequential Processor] Upload batch paused. Awaiting user resume...');
+          await new Promise<void>((resolve) => {
+            pauseResolverRef.current = resolve;
+          });
+        }
+
+        // 3. Post-pause cancel check
+        if (isCancelledRef.current) {
+          break;
+        }
+
+        // Always read the freshest live state of this item
+        const item = uploadFilesRef.current.find(f => f.id === currentList[i].id) || currentList[i];
+
+        // Never restart or re-upload already completed files
+        if (item.status === 'COMPLETED') {
+          continue;
+        }
+
+        setCurrentFileIndex(i);
+        setCurrentFileName(item.file.name);
+        activeAbortControllerRef.current = new AbortController();
+
+        try {
+          const res = await uploadSingleFileWithRetry(
+            item,
+            activeAssignment,
+            activeAbortControllerRef.current.signal
+          );
+
+          if (res.success && res.data) {
+            completedCount++;
+            setUploadFiles(prev =>
+              prev.map(f =>
+                f.id === item.id
+                  ? {
+                      ...f,
+                      status: 'COMPLETED',
+                      progress: 100,
+                      driveFileId: res.driveFileId || f.driveFileId,
+                      driveWebUrl: res.data.asset?.drive_web_url,
+                      driveFolderUrl: res.data.destination?.driveFolderUrl,
+                      error: undefined
+                    }
+                  : f
+              )
+            );
+          } else {
+            failedCount++;
+            const isRegFail = Boolean(res.driveFileId) || res.stage === 'REGISTER';
+            setUploadFiles(prev =>
+              prev.map(f =>
+                f.id === item.id
+                  ? {
+                      ...f,
+                      status: isRegFail ? 'REGISTRATION_FAILED' : 'FAILED',
+                      driveFileId: res.driveFileId || f.driveFileId,
+                      uploadUrl: res.uploadUrl || f.uploadUrl,
+                      errorStage: res.stage,
+                      error: res.error || (isRegFail ? 'Drive upload succeeded but database registration failed.' : 'Upload failed')
+                    }
+                  : f
+              )
+            );
+          }
+        } catch (fileErr: any) {
+          if (activeAbortControllerRef.current?.signal.aborted) {
+            console.log(`[Sequential Processor] File ${item.file.name} cancelled by user.`);
+            break;
+          }
+          failedCount++;
+          setUploadFiles(prev =>
+            prev.map(f =>
+              f.id === item.id
+                ? {
+                    ...f,
+                    status: 'FAILED',
+                    error: fileErr.message || 'Upload failed'
+                  }
+                : f
+            )
+          );
+        } finally {
+          activeAbortControllerRef.current = null;
+        }
       }
-      await Promise.all(workers);
     } finally {
       isUploadingRef.current = false;
+      isPausedRef.current = false;
       setIsUploading(false);
-      processingIdsRef.current.clear();
+      setIsPaused(false);
+      setCurrentFileIndex(-1);
+      setCurrentFileName('');
+      activeAbortControllerRef.current = null;
+      pauseResolverRef.current = null;
     }
 
     const folderTargetDisplay = selectedFolderPath || destinationFolderInfo?.fullPath || 'SAVISKAR 2026';
@@ -598,13 +710,77 @@ export const FieldCrewPortalPage: React.FC = () => {
       setUploadSummaryMessage(
         failedCount === 0
           ? `✓ Successfully uploaded all ${completedCount} file(s) into Google Drive folder "${folderTargetDisplay}".`
-          : `✓ Uploaded ${completedCount} file(s) into Google Drive folder "${folderTargetDisplay}" (${failedCount} failed - tap "Upload All" to retry failed).`
+          : `✓ Uploaded ${completedCount} file(s) into Google Drive folder "${folderTargetDisplay}" (${failedCount} failed - click "Retry Failed" to sync remaining).`
       );
-      api.getMediaAssets({ assignment_id: selectedAssignment.id }).then(setAssignedMedia).catch(() => {});
-      api.getAssignment(selectedAssignment.id).then(setSelectedAssignment).catch(() => {});
+      if (activeAssignment?.id && activeAssignment.id !== 'general-field-upload') {
+        api.getMediaAssets({ assignment_id: activeAssignment.id }).then(setAssignedMedia).catch(() => {});
+        api.getAssignment(activeAssignment.id).then(setSelectedAssignment).catch(() => {});
+      }
     } else if (failedCount > 0) {
-      setUploadSummaryMessage(`Upload failed for ${failedCount} file(s). Please verify network and Google Drive connection.`);
+      setUploadSummaryMessage(`Upload failed for ${failedCount} file(s). View error details below or click Retry Failed.`);
     }
+  };
+
+  // Pause batch processing safely
+  const handlePauseUpload = () => {
+    if (!isUploadingRef.current || isPausedRef.current) return;
+    isPausedRef.current = true;
+    setIsPaused(true);
+  };
+
+  // Resume batch processing safely
+  const handleResumeUpload = () => {
+    if (!isPausedRef.current) return;
+    isPausedRef.current = false;
+    setIsPaused(false);
+    if (pauseResolverRef.current) {
+      pauseResolverRef.current();
+      pauseResolverRef.current = null;
+    }
+  };
+
+  // Cancel batch processing safely (never deletes already uploaded Drive files)
+  const handleCancelUpload = () => {
+    isCancelledRef.current = true;
+    isPausedRef.current = false;
+    if (pauseResolverRef.current) {
+      pauseResolverRef.current();
+      pauseResolverRef.current = null;
+    }
+    if (activeAbortControllerRef.current) {
+      activeAbortControllerRef.current.abort();
+      activeAbortControllerRef.current = null;
+    }
+    setIsPaused(false);
+    setIsUploading(false);
+    isUploadingRef.current = false;
+    setCurrentFileIndex(-1);
+    setCurrentFileName('');
+    setUploadSummaryMessage('Upload batch stopped. All previously uploaded files remain safely stored in Google Drive.');
+  };
+
+  // Retry failed items safely (idempotent, skips re-uploading bytes if already in Drive)
+  const handleRetryFailed = () => {
+    if (isUploadingRef.current) return;
+    setUploadFiles(prev =>
+      prev.map(f =>
+        f.status === 'FAILED' || f.status === 'REGISTRATION_FAILED'
+          ? { ...f, status: f.driveFileId ? 'REGISTRATION_FAILED' : 'QUEUED', error: undefined }
+          : f
+      )
+    );
+    setTimeout(() => {
+      handleStartUpload();
+    }, 50);
+  };
+
+  // Clear entire queue and free object URLs
+  const handleClearQueue = () => {
+    uploadFiles.forEach(f => {
+      if (f.previewUrl) URL.revokeObjectURL(f.previewUrl);
+    });
+    setUploadFiles([]);
+    setUploadSummaryMessage('');
   };
 
   // Drag and drop handlers
@@ -635,8 +811,11 @@ export const FieldCrewPortalPage: React.FC = () => {
   const overallQueuePercent = totalQueueBytes > 0 ? Math.min(100, Math.round((totalQueueLoadedBytes / totalQueueBytes) * 100)) : 0;
   const activeSpeed = uploadFiles.find(f => f.status === 'UPLOADING' && f.speedBytesPerSec)?.speedBytesPerSec;
 
+  const totalCount = uploadFiles.length;
   const pendingCount = uploadFiles.filter(f => f.status === 'QUEUED' || f.status === 'FAILED' || f.status === 'REGISTRATION_FAILED').length;
   const completedCount = uploadFiles.filter(f => f.status === 'COMPLETED').length;
+  const failedCount = uploadFiles.filter(f => f.status === 'FAILED' || f.status === 'REGISTRATION_FAILED').length;
+  const remainingCount = uploadFiles.filter(f => f.status === 'QUEUED' || f.status === 'OPTIMIZING' || f.status === 'UPLOADING' || f.status === 'VERIFYING' || f.status === 'REGISTERING').length;
 
   const completedShotsCount = selectedAssignment?.checklist?.filter(c => c.is_completed).length || 0;
   const totalShotsCount = selectedAssignment?.checklist?.length || 0;
@@ -1138,15 +1317,21 @@ export const FieldCrewPortalPage: React.FC = () => {
                   {/* Queued Files Worklist */}
                   {uploadFiles.length > 0 && (
                     <div className="p-5 rounded-2xl bg-white border border-slate-200/80 shadow-xs space-y-4">
+                      {/* Batch Controls & Queue Status Header */}
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
                             <h4 className="text-sm font-bold text-slate-900">
                               Selected Files ({uploadFiles.length})
                             </h4>
-                            {isUploading && (
-                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-800 animate-pulse">
-                                Direct Drive Streaming (3x Parallel)
+                            {isUploading && !isPaused && (
+                              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800 animate-pulse flex items-center gap-1">
+                                <RefreshCw className="w-3 h-3 animate-spin" /> Sequential Processing (1 file at a time)
+                              </span>
+                            )}
+                            {isPaused && (
+                              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900 flex items-center gap-1">
+                                <Pause className="w-3 h-3" /> Batch Paused
                               </span>
                             )}
                             {totalSavedBytes > 0 && !isUploading && (
@@ -1156,7 +1341,7 @@ export const FieldCrewPortalPage: React.FC = () => {
                             )}
                           </div>
                           <p className="text-xs text-slate-500 mt-1">
-                            Queue: <strong className="text-slate-800">{completedCount}/{uploadFiles.length} files</strong> ({formatFileSize(totalQueueLoadedBytes)} of {formatFileSize(totalQueueBytes)})
+                            Progress: <strong className="text-slate-800">{completedCount}/{uploadFiles.length} completed</strong> ({formatFileSize(totalQueueLoadedBytes)} of {formatFileSize(totalQueueBytes)})
                             {activeSpeed && activeSpeed > 0 ? ` • ${formatSpeed(activeSpeed)}` : ''}
                           </p>
                           {isUploading && (
@@ -1169,52 +1354,131 @@ export const FieldCrewPortalPage: React.FC = () => {
                           )}
                         </div>
 
-                        <div className="flex items-center gap-2 self-start sm:self-auto shrink-0">
-                          <button
-                            onClick={() => setUploadFiles([])}
-                            disabled={isUploading}
-                            className="px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-600 hover:text-red-600 hover:bg-slate-100 disabled:opacity-50 transition-colors"
-                          >
-                            Clear
-                          </button>
+                        {/* Control Buttons: Start, Pause, Resume, Cancel, Retry, Clear */}
+                        <div className="flex items-center gap-2 flex-wrap self-start sm:self-auto shrink-0">
+                          {!isUploading && !isPaused && (
+                            <>
+                              <button
+                                onClick={handleClearQueue}
+                                className="px-3 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:text-red-600 hover:bg-slate-100 transition-colors"
+                              >
+                                Clear
+                              </button>
 
-                          <button
-                            onClick={handleStartUpload}
-                            disabled={isUploading || pendingCount === 0}
-                            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white shadow-xs transition-colors"
-                          >
-                            {isUploading ? (
-                              <>
-                                <RefreshCw className="w-4 h-4 animate-spin" />
-                                <span>Uploading 3 at a time...</span>
-                              </>
-                            ) : (
-                              <>
+                              {failedCount > 0 && (
+                                <button
+                                  onClick={handleRetryFailed}
+                                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-600 text-white shadow-xs transition-colors"
+                                  title="Retry only failed or unverified uploads"
+                                >
+                                  <RefreshCw className="w-3.5 h-3.5" />
+                                  <span>Retry Failed ({failedCount})</span>
+                                </button>
+                              )}
+
+                              <button
+                                onClick={handleStartUpload}
+                                disabled={pendingCount === 0}
+                                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white shadow-xs transition-colors"
+                              >
                                 <Zap className="w-4 h-4 fill-current" />
-                                <span>Upload All ({pendingCount} Files)</span>
-                              </>
-                            )}
-                          </button>
+                                <span>Start Upload ({pendingCount} Files)</span>
+                              </button>
+                            </>
+                          )}
+
+                          {isUploading && !isPaused && (
+                            <>
+                              <button
+                                onClick={handlePauseUpload}
+                                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-600 text-white shadow-xs transition-colors"
+                              >
+                                <Pause className="w-3.5 h-3.5" />
+                                <span>Pause</span>
+                              </button>
+
+                              <button
+                                onClick={handleCancelUpload}
+                                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-slate-800 hover:bg-rose-700 text-white shadow-xs transition-colors"
+                                title="Safely stops remaining uploads without deleting already uploaded files"
+                              >
+                                <StopCircle className="w-3.5 h-3.5" />
+                                <span>Cancel</span>
+                              </button>
+                            </>
+                          )}
+
+                          {isPaused && (
+                            <>
+                              <button
+                                onClick={handleResumeUpload}
+                                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs transition-colors"
+                              >
+                                <Play className="w-3.5 h-3.5 fill-current" />
+                                <span>Resume</span>
+                              </button>
+
+                              <button
+                                onClick={handleCancelUpload}
+                                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-slate-800 hover:bg-rose-700 text-white shadow-xs transition-colors"
+                              >
+                                <StopCircle className="w-3.5 h-3.5" />
+                                <span>Cancel</span>
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* 5-Metric Counter Status Grid */}
+                      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 p-3 rounded-xl bg-slate-50 border border-slate-200/90 text-xs">
+                        <div className="p-2.5 rounded-lg bg-white border border-slate-200">
+                          <span className="text-[10px] uppercase font-bold text-slate-500 block">Total Files</span>
+                          <span className="text-base font-extrabold text-slate-900">{totalCount}</span>
+                        </div>
+                        <div className="p-2.5 rounded-lg bg-white border border-slate-200">
+                          <span className="text-[10px] uppercase font-bold text-emerald-600 block">Completed</span>
+                          <span className="text-base font-extrabold text-emerald-700">{completedCount}</span>
+                        </div>
+                        <div className="p-2.5 rounded-lg bg-white border border-slate-200 col-span-2 sm:col-span-1">
+                          <span className="text-[10px] uppercase font-bold text-blue-600 block">Current File</span>
+                          <span className="text-xs font-bold text-slate-800 truncate block mt-0.5" title={currentFileName || 'None'}>
+                            {currentFileIndex >= 0 ? `#${currentFileIndex + 1}: ${currentFileName}` : (isUploading ? 'Preparing...' : '—')}
+                          </span>
+                        </div>
+                        <div className="p-2.5 rounded-lg bg-white border border-slate-200">
+                          <span className="text-[10px] uppercase font-bold text-amber-600 block">Remaining</span>
+                          <span className="text-base font-extrabold text-amber-700">{remainingCount}</span>
+                        </div>
+                        <div className="p-2.5 rounded-lg bg-white border border-slate-200">
+                          <span className="text-[10px] uppercase font-bold text-red-600 block">Failed</span>
+                          <span className="text-base font-extrabold text-red-700">{failedCount}</span>
                         </div>
                       </div>
 
                       {/* File Items Grid */}
                       <div className="space-y-2.5 max-h-96 overflow-y-auto pr-1">
-                        {uploadFiles.map(item => (
+                        {uploadFiles.map((item, itemIdx) => (
                           <div
                             key={item.id}
                             className={`p-3 rounded-xl border flex flex-col gap-2 transition-all ${
                               item.status === 'COMPLETED'
                                 ? 'bg-emerald-50/50 border-emerald-200'
                                 : item.status === 'UPLOADING' || item.status === 'REGISTERING' || item.status === 'VERIFYING'
-                                ? 'bg-red-50/40 border-red-200 shadow-2xs'
+                                ? 'bg-blue-50/50 border-blue-200 shadow-2xs'
                                 : item.status === 'REGISTRATION_FAILED'
                                 ? 'bg-amber-50/40 border-amber-200'
+                                : item.status === 'FAILED'
+                                ? 'bg-red-50/50 border-red-200'
                                 : 'bg-white border-slate-200/90'
                             }`}
                           >
                             <div className="flex items-center justify-between gap-3">
                               <div className="flex items-center gap-3 min-w-0">
+                                <span className="text-[10px] font-mono font-bold text-slate-400 w-5 shrink-0">
+                                  #{itemIdx + 1}
+                                </span>
+
                                 {item.previewUrl ? (
                                   <img
                                     src={item.previewUrl}
@@ -1239,6 +1503,11 @@ export const FieldCrewPortalPage: React.FC = () => {
                                       </span>
                                     )}
                                     <span>• {item.mediaType}</span>
+                                    {item.driveFileId && (
+                                      <span className="font-mono text-[9px] text-slate-400 truncate max-w-[100px]" title={item.driveFileId}>
+                                        ID: {item.driveFileId}
+                                      </span>
+                                    )}
                                   </div>
                                 </div>
                               </div>
@@ -1263,7 +1532,7 @@ export const FieldCrewPortalPage: React.FC = () => {
                                   </div>
                                 ) : item.status === 'UPLOADING' ? (
                                   <div className="flex flex-col items-end gap-0.5">
-                                    <div className="flex items-center gap-1.5 text-xs font-bold text-red-600">
+                                    <div className="flex items-center gap-1.5 text-xs font-bold text-blue-600">
                                       <RefreshCw className="w-3.5 h-3.5 animate-spin" />
                                       <span>{item.progress}%</span>
                                       {item.speedBytesPerSec && item.speedBytesPerSec > 0 && (
@@ -1280,17 +1549,16 @@ export const FieldCrewPortalPage: React.FC = () => {
                                   </div>
                                 ) : item.status === 'REGISTERING' || item.status === 'VERIFYING' ? (
                                   <span className="text-xs font-bold text-blue-600 flex items-center gap-1">
-                                    <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Verifying & Syncing...
+                                    <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Verifying & Registering...
                                   </span>
                                 ) : item.status === 'REGISTRATION_FAILED' ? (
                                   <div className="flex flex-col items-end">
-                                    <span className="text-xs font-bold text-amber-700 flex items-center gap-1" title={item.error}>
-                                      <AlertTriangle className="w-4 h-4 text-amber-500" /> Saved in Drive (Sync Pending)
+                                    <span className="text-xs font-bold text-amber-700 flex items-center gap-1">
+                                      <AlertTriangle className="w-4 h-4 text-amber-500" /> In Drive (Registration Pending)
                                     </span>
-                                    <span className="text-[10px] text-amber-600">Tap Upload All to retry sync</span>
                                   </div>
                                 ) : item.status === 'FAILED' ? (
-                                  <span className="text-xs font-bold text-red-600 flex items-center gap-1" title={item.error}>
+                                  <span className="text-xs font-bold text-red-600 flex items-center gap-1">
                                     <AlertCircle className="w-4 h-4" /> Failed
                                   </span>
                                 ) : item.status === 'OPTIMIZING' ? (
@@ -1308,6 +1576,17 @@ export const FieldCrewPortalPage: React.FC = () => {
                                 )}
                               </div>
                             </div>
+
+                            {/* Prominent Real Error Display */}
+                            {item.error && (
+                              <div className="p-2 rounded-lg bg-red-100/70 border border-red-200/90 text-xs text-red-800 flex items-start gap-2 font-mono">
+                                <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                                <div className="min-w-0 flex-1">
+                                  <span className="font-bold">Error: </span>
+                                  <span className="break-all">{item.error}</span>
+                                </div>
+                              </div>
+                            )}
 
                             {/* Live Progress Bar */}
                             {(item.status === 'UPLOADING' || item.status === 'REGISTERING') && (

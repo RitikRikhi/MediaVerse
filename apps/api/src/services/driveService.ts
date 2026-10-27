@@ -1440,6 +1440,25 @@ export class DriveService {
     }
   }
 
+  // Helper to verify if an ID looks like an authentic Google Drive folder ID
+  static isValidGoogleDriveId(id?: string): boolean {
+    if (!id || typeof id !== 'string') return false;
+    const clean = id.trim();
+    if (!clean) return false;
+    if (
+      clean.startsWith('sub-') ||
+      clean.startsWith('user-drive-') ||
+      clean.startsWith('member-drive-') ||
+      clean.startsWith('folder-') ||
+      clean.startsWith('sav26-') ||
+      clean.startsWith('test-')
+    ) {
+      return false;
+    }
+    // Google Drive file and folder IDs are standard Base64url style alphanumeric tokens (15-70 chars)
+    return /^[a-zA-Z0-9_-]{15,70}$/.test(clean);
+  }
+
   // Create direct browser-to-Drive resumable upload session (no file routing through server)
   static async createResumableUploadSession(options: {
     filename: string;
@@ -1463,45 +1482,44 @@ export class DriveService {
     let destinationFolderId = (options.targetFolderId || '').trim();
     let finalFolderPath = (options.targetFolderPath || '').trim();
 
-    // Check if targetFolderId belongs to an offline-prefixed member subfolder or root
-    if (destinationFolderId && (destinationFolderId.startsWith('sub-') || destinationFolderId.startsWith('member-drive-'))) {
+    // 1. If destinationFolderId is a temporary/offline placeholder, resolve to authentic Drive ID
+    if (destinationFolderId && !this.isValidGoogleDriveId(destinationFolderId)) {
       let resolvedRealId = '';
-      for (const md of this.memberDrives) {
-        const matchingSub = md.subfolders?.find(s => s.driveFolderId === destinationFolderId || s.id === destinationFolderId);
-        if (matchingSub) {
-          if (md.driveFolderId && !md.driveFolderId.startsWith('member-drive-')) {
-            try {
-              resolvedRealId = await this.getOrCreateDriveFolder(matchingSub.name, md.driveFolderId);
-              matchingSub.driveFolderId = resolvedRealId;
-              matchingSub.driveWebUrl = `https://drive.google.com/drive/folders/${resolvedRealId}`;
-              this.saveMemberDrivesToDisk();
-            } catch {
-              resolvedRealId = md.driveFolderId;
-            }
+      if (this.folderIdCache.has(destinationFolderId)) {
+        resolvedRealId = this.folderIdCache.get(destinationFolderId)!;
+      }
+      if (!resolvedRealId) {
+        for (const md of this.memberDrives) {
+          const matchingSub = md.subfolders?.find(s => s.driveFolderId === destinationFolderId || s.id === destinationFolderId || s.name === destinationFolderId);
+          if (matchingSub && this.isValidGoogleDriveId(matchingSub.driveFolderId)) {
+            resolvedRealId = matchingSub.driveFolderId;
+            break;
           }
-          break;
-        }
-        if (md.driveFolderId === destinationFolderId || md.id === destinationFolderId) {
-          if (md.driveFolderId && !md.driveFolderId.startsWith('member-drive-')) {
+          if ((md.driveFolderId === destinationFolderId || md.id === destinationFolderId) && this.isValidGoogleDriveId(md.driveFolderId)) {
             resolvedRealId = md.driveFolderId;
+            break;
           }
-          break;
         }
       }
-      destinationFolderId = resolvedRealId || (await this.resolveRootFolderId()).id;
+      if (!resolvedRealId) {
+        const matchingDbFolder = db.mediaFolders.find(f => f.drive_folder_id === destinationFolderId || f.id === destinationFolderId || f.folder_name === destinationFolderId);
+        if (matchingDbFolder && this.isValidGoogleDriveId(matchingDbFolder.drive_folder_id)) {
+          resolvedRealId = matchingDbFolder.drive_folder_id;
+        }
+      }
+      destinationFolderId = resolvedRealId;
     }
 
-    if (!destinationFolderId) {
+    // 2. Fall back to resolved category folder or verified festival root
+    if (!this.isValidGoogleDriveId(destinationFolderId)) {
       const dest = options.destination || this.resolveDestination();
-      if (dest.driveFolderId && !dest.driveFolderId.startsWith('sav26-')) {
+      if (this.isValidGoogleDriveId(dest.driveFolderId)) {
         destinationFolderId = dest.driveFolderId;
-        finalFolderPath = dest.fullPath;
+        finalFolderPath = finalFolderPath || dest.fullPath;
       } else {
         const root = await this.resolveRootFolderId();
-        const rootId = root.id;
-        finalFolderPath = dest.fullPath;
-        const dayFolderId = await this.getOrCreateDriveFolder(dest.day, rootId);
-        destinationFolderId = await this.getOrCreateDriveFolder(dest.category, dayFolderId);
+        destinationFolderId = root.id;
+        finalFolderPath = finalFolderPath || dest.fullPath || 'SAVISKAR 2026';
       }
     }
 
@@ -1576,34 +1594,34 @@ export class DriveService {
     let destinationFolderId: string = '';
     let finalFolderPath: string = '';
 
-    // 1. Ultra-fast direct check from targetFolderId (0ms lookup)
-    if (targetFolderId && targetFolderId.trim() && !targetFolderId.startsWith('sav26-')) {
+    // 1. If targetFolderId is provided, resolve placeholder or check cache
+    if (targetFolderId && targetFolderId.trim()) {
       const cleanTargetId = targetFolderId.trim();
-      if (cleanTargetId.startsWith('sub-') || cleanTargetId.startsWith('member-drive-')) {
+      if (!this.isValidGoogleDriveId(cleanTargetId)) {
         let resolvedRealId = '';
-        for (const md of this.memberDrives) {
-          const matchingSub = md.subfolders?.find(s => s.driveFolderId === cleanTargetId || s.id === cleanTargetId);
-          if (matchingSub) {
-            if (md.driveFolderId && !md.driveFolderId.startsWith('member-drive-')) {
-              try {
-                resolvedRealId = await this.getOrCreateDriveFolder(matchingSub.name, md.driveFolderId);
-                matchingSub.driveFolderId = resolvedRealId;
-                matchingSub.driveWebUrl = `https://drive.google.com/drive/folders/${resolvedRealId}`;
-                this.saveMemberDrivesToDisk();
-              } catch {
-                resolvedRealId = md.driveFolderId;
-              }
+        if (this.folderIdCache.has(cleanTargetId)) {
+          resolvedRealId = this.folderIdCache.get(cleanTargetId)!;
+        }
+        if (!resolvedRealId) {
+          for (const md of this.memberDrives) {
+            const matchingSub = md.subfolders?.find(s => s.driveFolderId === cleanTargetId || s.id === cleanTargetId || s.name === cleanTargetId);
+            if (matchingSub && this.isValidGoogleDriveId(matchingSub.driveFolderId)) {
+              resolvedRealId = matchingSub.driveFolderId;
+              break;
             }
-            break;
-          }
-          if (md.driveFolderId === cleanTargetId || md.id === cleanTargetId) {
-            if (md.driveFolderId && !md.driveFolderId.startsWith('member-drive-')) {
+            if ((md.driveFolderId === cleanTargetId || md.id === cleanTargetId) && this.isValidGoogleDriveId(md.driveFolderId)) {
               resolvedRealId = md.driveFolderId;
+              break;
             }
-            break;
           }
         }
-        destinationFolderId = resolvedRealId || (await this.resolveRootFolderId()).id;
+        if (!resolvedRealId) {
+          const matchingDbFolder = db.mediaFolders.find(f => f.drive_folder_id === cleanTargetId || f.id === cleanTargetId || f.folder_name === cleanTargetId);
+          if (matchingDbFolder && this.isValidGoogleDriveId(matchingDbFolder.drive_folder_id)) {
+            resolvedRealId = matchingDbFolder.drive_folder_id;
+          }
+        }
+        destinationFolderId = resolvedRealId;
       } else {
         destinationFolderId = cleanTargetId;
       }
@@ -1615,25 +1633,23 @@ export class DriveService {
       } else {
         const structure = this.getFolderStructure();
         const node = this.findNodeByPath(structure, targetFolderPath.trim());
-        if (node && node.driveFolderId) {
-          destinationFolderId = node.driveFolderId;
+        if (node && this.isValidGoogleDriveId(node.driveFolderId)) {
+          destinationFolderId = node.driveFolderId!;
           finalFolderPath = node.path;
         }
       }
     }
 
-    // 2. Direct fast check from destination (0ms lookup)
-    if (!destinationFolderId) {
+    // 2. Direct fast check from destination or verified festival root
+    if (!this.isValidGoogleDriveId(destinationFolderId)) {
       const destination = options.destination || this.resolveDestination();
-      if (destination.driveFolderId && !destination.driveFolderId.startsWith('sav26-')) {
+      if (this.isValidGoogleDriveId(destination.driveFolderId)) {
         destinationFolderId = destination.driveFolderId;
         finalFolderPath = destination.fullPath;
       } else {
         const root = await this.resolveRootFolderId();
-        const rootId = root.id;
-        finalFolderPath = destination.fullPath;
-        const dayFolderId = await this.getOrCreateDriveFolder(destination.day, rootId);
-        destinationFolderId = await this.getOrCreateDriveFolder(destination.category, dayFolderId);
+        destinationFolderId = root.id;
+        finalFolderPath = destination.fullPath || 'SAVISKAR 2026';
       }
     }
 
