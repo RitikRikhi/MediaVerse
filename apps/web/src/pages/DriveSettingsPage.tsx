@@ -37,7 +37,12 @@ import {
   X,
   Lock,
   Shield,
-  Eye
+  Eye,
+  Upload,
+  FileUp,
+  File,
+  CheckCheck,
+  FileText
 } from 'lucide-react';
 import { Modal } from '../components/ui/Modal';
 
@@ -114,6 +119,24 @@ export const DriveSettingsPage: React.FC = () => {
   const [transferFilterType, setTransferFilterType] = useState<string>('ALL');
   const [isTransferring, setIsTransferring] = useState(false);
   const [transferSuccessBanner, setTransferSuccessBanner] = useState<string | null>(null);
+
+  // Data Transfer Mode: 'EXISTING' (Assets) vs 'PC_UPLOAD' (Direct PC Upload)
+  const [transferTabMode, setTransferTabMode] = useState<'EXISTING' | 'PC_UPLOAD'>('EXISTING');
+
+  // Direct PC Upload Modal & Execution State
+  const [showUploadPcModal, setShowUploadPcModal] = useState(false);
+  const [uploadPcTargetDriveId, setUploadPcTargetDriveId] = useState('');
+  const [uploadPcTargetFolderId, setUploadPcTargetFolderId] = useState('');
+  const [uploadPcTargetFolderPath, setUploadPcTargetFolderPath] = useState('');
+  const [uploadPcCategory, setUploadPcCategory] = useState<string>('RAW_PHOTO');
+  const [uploadPcSelectedFiles, setUploadPcSelectedFiles] = useState<File[]>([]);
+  const [uploadPcDescription, setUploadPcDescription] = useState('');
+  const [uploadPcTags, setUploadPcTags] = useState('');
+  const [isUploadingPc, setIsUploadingPc] = useState(false);
+  const [uploadPcCurrentFileIndex, setUploadPcCurrentFileIndex] = useState(0);
+  const [uploadPcCurrentProgress, setUploadPcCurrentProgress] = useState(0);
+  const [uploadPcOverallProgress, setUploadPcOverallProgress] = useState(0);
+  const [uploadPcSuccessResults, setUploadPcSuccessResults] = useState<Array<{ name: string; url: string; folder: string }>>([]);
 
   // Collapsed paths
   const [collapsedPaths, setCollapsedPaths] = useState<Set<string>>(new Set());
@@ -436,15 +459,184 @@ export const DriveSettingsPage: React.FC = () => {
     }
   };
 
+  const resolveTargetFolderInfo = (folderId: string): { folderId: string; folderPath: string } => {
+    if (!folderId) return { folderId: '', folderPath: '' };
+
+    // 1. Check in Member Drives root
+    const memberRoot = memberDrives.find(m => m.driveFolderId === folderId || m.id === folderId);
+    if (memberRoot) return { folderId: memberRoot.driveFolderId, folderPath: memberRoot.drivePath };
+
+    // 2. Check in Member Drives subfolders
+    for (const m of memberDrives) {
+      const sub = m.subfolders?.find(s => s.driveFolderId === folderId || s.id === folderId);
+      if (sub) {
+        return { folderId: sub.driveFolderId, folderPath: sub.path };
+      }
+    }
+
+    // 3. Check in flatList (Master SAVISKAR hierarchy)
+    const masterItem = flatList.find(f => (f.driveFolderId && f.driveFolderId === folderId) || f.path === folderId);
+    if (masterItem) return { folderId: masterItem.driveFolderId || masterItem.path, folderPath: masterItem.path };
+
+    return { folderId, folderPath: 'Selected Google Drive Folder' };
+  };
+
+  const formatFileSize = (bytes: number): string => {
+    if (!bytes || bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
+  };
+
   // Quick Preset Transfer to Vlogging
   const handleQuickTransferToVlogging = (day: 1 | 2) => {
-    const vloggingDriveId = day === 1 ? '1m7U0n1wuICACLVBmKl8YYLqEXvmVALWQ' : '1LF1A9AbGiWyQlYKT0V0v7LH3OPCcBGUF';
-    const vloggingPath = `/DSA MEDIAVERSE SAVISKAR 26/Day ${day}/Raw Videography`;
-    setTransferTargetFolderId(vloggingDriveId);
-    setTransferTargetFolderPath(vloggingPath);
+    const videoDrive = memberDrives.find(m => m.role === 'VIDEOGRAPHER' || (m.role as string) === 'VLOGGER');
+    const daySub = videoDrive?.subfolders?.find(s => s.name.toLowerCase().includes(`day ${day}`) || s.path.toLowerCase().includes(`day ${day}`));
+    const masterDay = flatList.find(f => f.path.toLowerCase().includes(`day ${day}`) && (f.path.toLowerCase().includes('videography') || f.path.toLowerCase().includes('vlog')));
+
+    const targetId = daySub?.driveFolderId || videoDrive?.driveFolderId || masterDay?.driveFolderId || masterDay?.path || '';
+    const targetPath = daySub?.path || videoDrive?.drivePath || masterDay?.path || `/DSA MEDIAVERSE SAVISKAR 26/Day ${day}/Raw Videography`;
+
+    setTransferTargetFolderId(targetId);
+    setTransferTargetFolderPath(targetPath);
     setTransferNewCategory('RAW_VIDEO');
     setActiveTab('DATA_TRANSFER');
-    setProvisionMessage(`Target set to Day ${day} Vlogging & Videography. Select assets below to transfer.`);
+    setProvisionMessage(`Target set to Day ${day} Vlogging: ${targetPath}`);
+  };
+
+  const handleQuickTransferToEditing = () => {
+    const editorDrive = memberDrives.find(m => m.role === 'VIDEO_EDITOR');
+    const reelsSub = editorDrive?.subfolders?.find(s => s.name.toLowerCase().includes('reel') || s.name.toLowerCase().includes('draft') || s.name.toLowerCase().includes('edit'));
+    const masterEdit = flatList.find(f => f.path.toLowerCase().includes('editing') || f.name.toLowerCase().includes('editing'));
+
+    const targetId = reelsSub?.driveFolderId || editorDrive?.driveFolderId || masterEdit?.driveFolderId || masterEdit?.path || '';
+    const targetPath = reelsSub?.path || editorDrive?.drivePath || masterEdit?.path || '/DSA MEDIAVERSE SAVISKAR 26/Editing Projects';
+
+    setTransferTargetFolderId(targetId);
+    setTransferTargetFolderPath(targetPath);
+    setTransferNewCategory('EDITED_DRAFT');
+    setActiveTab('DATA_TRANSFER');
+    setProvisionMessage(`Target set to Video Editing Suite: ${targetPath}`);
+  };
+
+  const handleQuickTransferToPhotography = () => {
+    const photoDrive = memberDrives.find(m => m.role === 'PHOTOGRAPHER');
+    const rawSub = photoDrive?.subfolders?.find(s => s.name.toLowerCase().includes('raw') || s.name.toLowerCase().includes('photo') || s.name.toLowerCase().includes('stills'));
+    const masterPhoto = flatList.find(f => f.path.toLowerCase().includes('photography') || f.name.toLowerCase().includes('photography'));
+
+    const targetId = rawSub?.driveFolderId || photoDrive?.driveFolderId || masterPhoto?.driveFolderId || masterPhoto?.path || '';
+    const targetPath = rawSub?.path || photoDrive?.drivePath || masterPhoto?.path || '/DSA MEDIAVERSE SAVISKAR 26/Photography';
+
+    setTransferTargetFolderId(targetId);
+    setTransferTargetFolderPath(targetPath);
+    setTransferNewCategory('RAW_PHOTO');
+    setActiveTab('DATA_TRANSFER');
+    setProvisionMessage(`Target set to Photography Suite: ${targetPath}`);
+  };
+
+  const handleOpenUploadPcModal = (drive?: MemberDrive, targetSubfolderId?: string) => {
+    setUploadPcSuccessResults([]);
+    setUploadPcSelectedFiles([]);
+    setUploadPcDescription('');
+    setUploadPcTags('');
+
+    if (drive) {
+      setUploadPcTargetDriveId(drive.id);
+      if (targetSubfolderId) {
+        setUploadPcTargetFolderId(targetSubfolderId);
+        const sub = drive.subfolders?.find(s => s.driveFolderId === targetSubfolderId || s.id === targetSubfolderId);
+        setUploadPcTargetFolderPath(sub?.path || drive.drivePath);
+      } else {
+        const defaultSub = drive.subfolders?.[0];
+        setUploadPcTargetFolderId(defaultSub?.driveFolderId || drive.driveFolderId);
+        setUploadPcTargetFolderPath(defaultSub?.path || drive.drivePath);
+      }
+      setUploadPcCategory(
+        drive.role === 'PHOTOGRAPHER' ? 'RAW_PHOTO' :
+        drive.role === 'VIDEO_EDITOR' ? 'EDITED_DRAFT' : 'RAW_VIDEO'
+      );
+    } else {
+      setUploadPcTargetDriveId('');
+      if (transferTargetFolderId) {
+        setUploadPcTargetFolderId(transferTargetFolderId);
+        setUploadPcTargetFolderPath(transferTargetFolderPath);
+      } else if (memberDrives[0]) {
+        const d = memberDrives[0];
+        setUploadPcTargetFolderId(d.subfolders?.[0]?.driveFolderId || d.driveFolderId);
+        setUploadPcTargetFolderPath(d.subfolders?.[0]?.path || d.drivePath);
+      }
+      setUploadPcCategory('RAW_PHOTO');
+    }
+    setShowUploadPcModal(true);
+  };
+
+  const handleFilesSelected = (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const newFiles = Array.from(files);
+    setUploadPcSelectedFiles(prev => [...prev, ...newFiles]);
+  };
+
+  const handleRemovePcFile = (index: number) => {
+    setUploadPcSelectedFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handleExecutePcUpload = async () => {
+    if (!uploadPcTargetFolderId) {
+      alert('Please select a target destination folder or subfolder.');
+      return;
+    }
+    if (uploadPcSelectedFiles.length === 0) {
+      alert('Please select at least one file from your PC to upload.');
+      return;
+    }
+
+    try {
+      setIsUploadingPc(true);
+      setUploadPcCurrentFileIndex(0);
+      setUploadPcCurrentProgress(0);
+      setUploadPcOverallProgress(0);
+      setUploadPcSuccessResults([]);
+
+      const uploadedResults: Array<{ name: string; url: string; folder: string }> = [];
+      const totalFiles = uploadPcSelectedFiles.length;
+
+      for (let i = 0; i < totalFiles; i++) {
+        setUploadPcCurrentFileIndex(i);
+        setUploadPcCurrentProgress(0);
+        const currentFile = uploadPcSelectedFiles[i];
+
+        const formData = new FormData();
+        formData.append('file', currentFile);
+        formData.append('target_folder_id', uploadPcTargetFolderId);
+        formData.append('target_folder_path', uploadPcTargetFolderPath || 'Google Drive Destination');
+        formData.append('media_type', uploadPcCategory);
+        if (uploadPcDescription) formData.append('description', uploadPcDescription);
+        if (uploadPcTags) formData.append('tags', uploadPcTags);
+
+        const res = await api.uploadMediaFile(formData, (percent) => {
+          setUploadPcCurrentProgress(percent);
+          const overall = Math.round(((i + (percent / 100)) / totalFiles) * 100);
+          setUploadPcOverallProgress(overall);
+        });
+
+        uploadedResults.push({
+          name: currentFile.name,
+          url: res.asset?.drive_web_url || '',
+          folder: uploadPcTargetFolderPath || 'Target Folder'
+        });
+      }
+
+      setUploadPcOverallProgress(100);
+      setUploadPcSuccessResults(uploadedResults);
+      setUploadPcSelectedFiles([]);
+      await loadData();
+    } catch (err: any) {
+      console.error('Failed PC file upload:', err);
+      alert(err.message || 'Error uploading file from PC to Google Drive');
+    } finally {
+      setIsUploadingPc(false);
+    }
   };
 
   const handleOpenAddModal = (parentPath?: string) => {
@@ -1049,20 +1241,34 @@ export const DriveSettingsPage: React.FC = () => {
                         </button>
                       </div>
 
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setTransferTargetFolderId(drive.driveFolderId);
-                          setTransferTargetFolderPath(drive.drivePath);
-                          setTransferNewCategory(drive.role === 'PHOTOGRAPHER' ? 'RAW_PHOTO' : 'RAW_VIDEO');
-                          setActiveTab('DATA_TRANSFER');
-                          setProvisionMessage(`Target set to ${drive.memberName}'s drive. Select media to transfer.`);
-                        }}
-                        className="w-full inline-flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:text-red-600 hover:bg-slate-50 transition-colors"
-                      >
-                        <ArrowRightLeft className="w-3 h-3 text-red-600" />
-                        <span>Transfer Data Into This Drive</span>
-                      </button>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenUploadPcModal(drive)}
+                          className="inline-flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl text-xs font-bold bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white shadow-xs transition-all cursor-pointer"
+                          title={`Upload files from PC directly into ${drive.memberName}'s drive`}
+                        >
+                          <Upload className="w-3.5 h-3.5" />
+                          <span>Upload from PC</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setTransferTargetFolderId(drive.driveFolderId);
+                            setTransferTargetFolderPath(drive.drivePath);
+                            setTransferNewCategory(drive.role === 'PHOTOGRAPHER' ? 'RAW_PHOTO' : 'RAW_VIDEO');
+                            setTransferTabMode('EXISTING');
+                            setActiveTab('DATA_TRANSFER');
+                            setProvisionMessage(`Target set to ${drive.memberName}'s drive. Select media to transfer.`);
+                          }}
+                          className="inline-flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-800 transition-colors cursor-pointer"
+                          title="Transfer central media assets into this drive"
+                        >
+                          <ArrowRightLeft className="w-3.5 h-3.5 text-red-600" />
+                          <span>Transfer Assets</span>
+                        </button>
+                      </div>
 
                       <div className="pt-1 border-t border-slate-100">
                         <button
@@ -1373,12 +1579,7 @@ export const DriveSettingsPage: React.FC = () => {
               </button>
 
               <button
-                onClick={() => {
-                  setTransferTargetFolderId('1Mgc1jPrW1OnjXCWh24ExtC7Selj5v0kb');
-                  setTransferTargetFolderPath('/DSA MEDIAVERSE SAVISKAR 26/Day 1/Editing Projects');
-                  setTransferNewCategory('EDITED_DRAFT');
-                  setProvisionMessage('Target set to Editing Projects. Select items below.');
-                }}
+                onClick={handleQuickTransferToEditing}
                 className="p-4 rounded-xl bg-blue-50/70 hover:bg-blue-100/70 border border-blue-200 text-left transition-all group"
               >
                 <div className="flex items-center justify-between mb-2">
@@ -1396,12 +1597,7 @@ export const DriveSettingsPage: React.FC = () => {
               </button>
 
               <button
-                onClick={() => {
-                  setTransferTargetFolderId('1tFGNR9WZo_9dGgf_6zBOHdBnpPRxBQXQ');
-                  setTransferTargetFolderPath('/DSA MEDIAVERSE SAVISKAR 26/Day 1/Photography');
-                  setTransferNewCategory('RAW_PHOTO');
-                  setProvisionMessage('Target set to Photography. Select items below.');
-                }}
+                onClick={handleQuickTransferToPhotography}
                 className="p-4 rounded-xl bg-red-50/70 hover:bg-red-100/70 border border-red-200 text-left transition-all group"
               >
                 <div className="flex items-center justify-between mb-2">
@@ -1420,189 +1616,512 @@ export const DriveSettingsPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Transfer Execution Console */}
-          <div className="p-6 rounded-2xl bg-white border border-slate-200/80 shadow-card space-y-6">
-            <div>
-              <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                <ArrowRightLeft className="w-5 h-5 text-red-600" />
-                <span>Execute Media Transfer</span>
-              </h3>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Select destination folder, asset category, and media items. When executed, Google Drive updates the parent folder directly.
-              </p>
-            </div>
+          {/* Transfer & Upload Mode Switcher */}
+          <div className="flex items-center gap-2 p-1.5 rounded-2xl bg-slate-100 border border-slate-200/80 w-full sm:w-fit">
+            <button
+              type="button"
+              onClick={() => setTransferTabMode('EXISTING')}
+              className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                transferTabMode === 'EXISTING'
+                  ? 'bg-white text-slate-900 shadow-sm border border-slate-200/60'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <ArrowRightLeft className="w-4 h-4 text-red-600" />
+              <span>Transfer Central Assets</span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 font-mono">
+                {availableAssets.length}
+              </span>
+            </button>
 
-            {/* Target Destination Setup */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 rounded-xl bg-slate-50 border border-slate-200">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Target Destination Folder
-                </label>
-                <select
-                  value={transferTargetFolderId}
-                  onChange={e => {
-                    setTransferTargetFolderId(e.target.value);
-                    const foundItem = flatList.find(f => f.driveFolderId === e.target.value);
-                    if (foundItem) {
-                      setTransferTargetFolderPath(foundItem.path);
-                    } else {
-                      const memberD = memberDrives.find(m => m.driveFolderId === e.target.value);
-                      if (memberD) setTransferTargetFolderPath(memberD.drivePath);
-                    }
-                  }}
-                  className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs font-medium text-slate-900 focus:outline-none focus:border-red-500"
-                >
-                  <option value="">-- Choose Target Folder --</option>
-                  <optgroup label="Official Master Hierarchy">
-                    {flatList.map(item => (
-                      <option key={item.path} value={item.driveFolderId || item.path}>
-                        📁 {item.name} ({item.path})
-                      </option>
-                    ))}
-                  </optgroup>
-                  <optgroup label="Member Gmail Drives">
-                    {memberDrives.map(drive => (
-                      <option key={drive.id} value={drive.driveFolderId}>
-                        👤 {drive.memberName} ({drive.memberEmail})
-                      </option>
-                    ))}
-                  </optgroup>
-                </select>
-                {transferTargetFolderPath && (
-                  <p className="text-[10px] text-slate-500 font-mono mt-1 truncate">
-                    Destination: {transferTargetFolderPath}
-                  </p>
-                )}
-              </div>
+            <button
+              type="button"
+              onClick={() => setTransferTabMode('PC_UPLOAD')}
+              className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                transferTabMode === 'PC_UPLOAD'
+                  ? 'bg-gradient-to-r from-red-600 to-rose-600 text-white shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Upload className="w-4 h-4" />
+              <span>Direct Upload from PC</span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/20 text-white font-mono">
+                Fast & Direct
+              </span>
+            </button>
+          </div>
 
+          {/* ================================================= */}
+          {/* SUB-PANEL 1: TRANSFER EXISTING MEDIA ASSETS */}
+          {/* ================================================= */}
+          {transferTabMode === 'EXISTING' && (
+            <div className="p-6 rounded-2xl bg-white border border-slate-200/80 shadow-card space-y-6">
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Convert Asset Category to:
-                </label>
-                <select
-                  value={transferNewCategory}
-                  onChange={e => setTransferNewCategory(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs font-medium text-slate-900 focus:outline-none focus:border-red-500"
-                >
-                  <option value="RAW_VIDEO">RAW Video / Vlogging (4K Clips & BTS)</option>
-                  <option value="RAW_PHOTO">RAW Photos (Stills & Keynotes)</option>
-                  <option value="EDITED_DRAFT">Review Versions (Editing Drafts)</option>
-                  <option value="FINAL_VIDEO">Approved Broadcast Deliverables</option>
-                </select>
-                <p className="text-[10px] text-slate-500 mt-1">
-                  Automatically updates metadata and tagging in the Central Media Library.
+                <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                  <ArrowRightLeft className="w-5 h-5 text-red-600" />
+                  <span>Execute Media Transfer</span>
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Select destination folder or subfolder, asset category, and media items. When executed, Google Drive updates the parent folder directly.
                 </p>
               </div>
-            </div>
 
-            {/* Asset Selection List */}
-            <div className="space-y-3">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold text-slate-800">Select Media Assets</span>
-                  <span className="text-xs text-slate-500">
-                    ({selectedAssetIds.length} of {filteredTransferAssets.length} selected)
-                  </span>
+              {/* Target Destination Setup */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 rounded-xl bg-slate-50 border border-slate-200">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Target Destination Folder / Subfolder
+                  </label>
+                  <select
+                    value={transferTargetFolderId}
+                    onChange={e => {
+                      const selId = e.target.value;
+                      setTransferTargetFolderId(selId);
+                      const info = resolveTargetFolderInfo(selId);
+                      setTransferTargetFolderPath(info.folderPath);
+                    }}
+                    className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs font-medium text-slate-900 focus:outline-none focus:border-red-500"
+                  >
+                    <option value="">-- Choose Target Folder / Subfolder --</option>
+                    
+                    {memberDrives.length > 0 && (
+                      <optgroup label="👤 Personal Member Drives & Specific Subfolders">
+                        {memberDrives.map(drive => (
+                          <React.Fragment key={drive.id}>
+                            <option value={drive.driveFolderId}>
+                              📁 {drive.memberName} [Root Drive] ({drive.role})
+                            </option>
+                            {drive.subfolders?.map(sub => (
+                              <option key={sub.id} value={sub.driveFolderId}>
+                                &nbsp;&nbsp;&nbsp;&nbsp;↳ 📂 {drive.memberName} / {sub.name}
+                              </option>
+                            ))}
+                          </React.Fragment>
+                        ))}
+                      </optgroup>
+                    )}
+
+                    <optgroup label="🏛️ SAVISKAR 2026 Master Hierarchy">
+                      {flatList.map(item => (
+                        <option key={item.path} value={item.driveFolderId || item.path}>
+                          📁 {item.name} ({item.path})
+                        </option>
+                      ))}
+                    </optgroup>
+                  </select>
+                  {transferTargetFolderPath && (
+                    <p className="text-[10px] text-slate-500 font-mono mt-1 truncate">
+                      Destination: {transferTargetFolderPath}
+                    </p>
+                  )}
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => {
-                      if (selectedAssetIds.length === filteredTransferAssets.length) {
-                        setSelectedAssetIds([]);
-                      } else {
-                        setSelectedAssetIds(filteredTransferAssets.map(a => a.id));
-                      }
-                    }}
-                    className="text-xs text-red-600 hover:text-red-700 font-bold hover:underline"
-                  >
-                    {selectedAssetIds.length === filteredTransferAssets.length ? 'Deselect All' : 'Select All'}
-                  </button>
-
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Convert Asset Category to:
+                  </label>
                   <select
-                    value={transferFilterType}
-                    onChange={e => setTransferFilterType(e.target.value)}
-                    className="px-2.5 py-1 rounded-lg bg-slate-50 border border-slate-200 text-xs font-medium text-slate-700"
+                    value={transferNewCategory}
+                    onChange={e => setTransferNewCategory(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs font-medium text-slate-900 focus:outline-none focus:border-red-500"
                   >
-                    <option value="ALL">All Types</option>
-                    <option value="RAW_PHOTO">Photos</option>
-                    <option value="RAW_VIDEO">Videos</option>
+                    <option value="RAW_VIDEO">RAW Video / Vlogging (4K Clips & BTS)</option>
+                    <option value="RAW_PHOTO">RAW Photos (Stills & Keynotes)</option>
+                    <option value="EDITED_DRAFT">Review Versions (Editing Drafts)</option>
+                    <option value="FINAL_VIDEO">Approved Broadcast Deliverables</option>
                   </select>
+                  <p className="text-[10px] text-slate-500 mt-1">
+                    Automatically updates metadata and tagging in the Central Media Library.
+                  </p>
                 </div>
               </div>
 
-              <div className="max-h-80 overflow-y-auto space-y-1.5 border border-slate-200 rounded-xl p-2 bg-slate-50/50">
-                {filteredTransferAssets.length === 0 ? (
-                  <div className="p-6 text-center text-xs text-slate-400">
-                    No media assets available to transfer.
+              {/* Asset Selection List */}
+              <div className="space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-slate-800">Select Media Assets</span>
+                    <span className="text-xs text-slate-500">
+                      ({selectedAssetIds.length} of {filteredTransferAssets.length} selected)
+                    </span>
                   </div>
-                ) : (
-                  filteredTransferAssets.map(asset => {
-                    const isSelected = selectedAssetIds.includes(asset.id);
-                    return (
-                      <div
-                        key={asset.id}
-                        onClick={() => {
-                          setSelectedAssetIds(prev =>
-                            isSelected ? prev.filter(id => id !== asset.id) : [...prev, asset.id]
-                          );
-                        }}
-                        className={`flex items-center justify-between p-2.5 rounded-lg border cursor-pointer transition-all ${
-                          isSelected
-                            ? 'bg-red-50/80 border-red-300 shadow-2xs'
-                            : 'bg-white hover:bg-slate-50 border-slate-200'
-                        }`}
-                      >
-                        <div className="flex items-center gap-3 min-w-0">
-                          <input
-                            type="checkbox"
-                            checked={isSelected}
-                            onChange={() => {}}
-                            className="rounded text-red-600 focus:ring-red-500 h-4 w-4"
-                          />
-                          <div className="min-w-0">
-                            <span className="text-xs font-bold text-slate-900 truncate block">
-                              {asset.filename}
-                            </span>
-                            <span className="text-[10px] text-slate-500 font-medium">
-                              {asset.media_type} • {asset.uploader_name || 'Crew'}
-                            </span>
-                          </div>
-                        </div>
 
-                        {asset.drive_file_id && (
-                          <span className="text-[10px] font-mono text-slate-400 bg-slate-100 px-2 py-0.5 rounded shrink-0">
-                            Drive ID: {asset.drive_file_id.slice(0, 8)}...
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => {
+                        if (selectedAssetIds.length === filteredTransferAssets.length) {
+                          setSelectedAssetIds([]);
+                        } else {
+                          setSelectedAssetIds(filteredTransferAssets.map(a => a.id));
+                        }
+                      }}
+                      className="text-xs text-red-600 hover:text-red-700 font-bold hover:underline"
+                    >
+                      {selectedAssetIds.length === filteredTransferAssets.length ? 'Deselect All' : 'Select All'}
+                    </button>
+
+                    <select
+                      value={transferFilterType}
+                      onChange={e => setTransferFilterType(e.target.value)}
+                      className="px-2.5 py-1 rounded-lg bg-slate-50 border border-slate-200 text-xs font-medium text-slate-700"
+                    >
+                      <option value="ALL">All Types</option>
+                      <option value="RAW_PHOTO">Photos</option>
+                      <option value="RAW_VIDEO">Videos</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="max-h-80 overflow-y-auto space-y-1.5 border border-slate-200 rounded-xl p-2 bg-slate-50/50">
+                  {filteredTransferAssets.length === 0 ? (
+                    <div className="p-6 text-center text-xs text-slate-400">
+                      No media assets available to transfer.
+                    </div>
+                  ) : (
+                    filteredTransferAssets.map(asset => {
+                      const isSelected = selectedAssetIds.includes(asset.id);
+                      return (
+                        <div
+                          key={asset.id}
+                          onClick={() => {
+                            setSelectedAssetIds(prev =>
+                              isSelected ? prev.filter(id => id !== asset.id) : [...prev, asset.id]
+                            );
+                          }}
+                          className={`flex items-center justify-between p-2.5 rounded-lg border cursor-pointer transition-all ${
+                            isSelected
+                              ? 'bg-red-50/80 border-red-300 shadow-2xs'
+                              : 'bg-white hover:bg-slate-50 border-slate-200'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => {}}
+                              className="rounded text-red-600 focus:ring-red-500 h-4 w-4"
+                            />
+                            <div className="min-w-0">
+                              <span className="text-xs font-bold text-slate-900 truncate block">
+                                {asset.filename}
+                              </span>
+                              <span className="text-[10px] text-slate-500 font-medium">
+                                {asset.media_type} • {asset.uploader_name || 'Crew'}
+                              </span>
+                            </div>
+                          </div>
+
+                          {asset.drive_file_id && (
+                            <span className="text-[10px] font-mono text-slate-400 bg-slate-100 px-2 py-0.5 rounded shrink-0">
+                              Drive ID: {asset.drive_file_id.slice(0, 8)}...
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
+              {/* Execute Button */}
+              <div className="pt-2 flex justify-end">
+                <button
+                  onClick={handleExecuteDataTransfer}
+                  disabled={isTransferring || selectedAssetIds.length === 0 || !transferTargetFolderId}
+                  className="px-6 py-3 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white shadow-xs transition-colors flex items-center gap-2 cursor-pointer"
+                >
+                  {isTransferring ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>Transferring in Google Drive...</span>
+                    </>
+                  ) : (
+                    <>
+                      <ArrowRightLeft className="w-4 h-4" />
+                      <span>Start Data Transfer ({selectedAssetIds.length} Assets)</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ================================================= */}
+          {/* SUB-PANEL 2: DIRECT PC FILE UPLOAD & TRANSFER */}
+          {/* ================================================= */}
+          {transferTabMode === 'PC_UPLOAD' && (
+            <div className="p-6 rounded-2xl bg-white border border-slate-200/80 shadow-card space-y-6 animate-fade-in">
+              <div>
+                <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                  <Upload className="w-5 h-5 text-red-600" />
+                  <span>Direct PC File Upload into Google Drive</span>
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Select files directly from your PC (Photos, 4K Footage, Reels) and transfer them straight into any member drive or particular subfolder.
+                </p>
+              </div>
+
+              {/* Target Destination Setup */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 rounded-xl bg-slate-50 border border-slate-200">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Target Destination Folder / Subfolder <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={uploadPcTargetFolderId}
+                    onChange={e => {
+                      const selId = e.target.value;
+                      setUploadPcTargetFolderId(selId);
+                      const info = resolveTargetFolderInfo(selId);
+                      setUploadPcTargetFolderPath(info.folderPath);
+                    }}
+                    className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs font-medium text-slate-900 focus:outline-none focus:border-red-500"
+                  >
+                    <option value="">-- Choose Target Folder / Subfolder --</option>
+                    
+                    {memberDrives.length > 0 && (
+                      <optgroup label="👤 Personal Member Drives & Specific Subfolders">
+                        {memberDrives.map(drive => (
+                          <React.Fragment key={drive.id}>
+                            <option value={drive.driveFolderId}>
+                              📁 {drive.memberName} [Root Drive] ({drive.role})
+                            </option>
+                            {drive.subfolders?.map(sub => (
+                              <option key={sub.id} value={sub.driveFolderId}>
+                                &nbsp;&nbsp;&nbsp;&nbsp;↳ 📂 {drive.memberName} / {sub.name}
+                              </option>
+                            ))}
+                          </React.Fragment>
+                        ))}
+                      </optgroup>
+                    )}
+
+                    <optgroup label="🏛️ SAVISKAR 2026 Master Hierarchy">
+                      {flatList.map(item => (
+                        <option key={item.path} value={item.driveFolderId || item.path}>
+                          📁 {item.name} ({item.path})
+                        </option>
+                      ))}
+                    </optgroup>
+                  </select>
+                  {uploadPcTargetFolderPath && (
+                    <p className="text-[10px] text-slate-500 font-mono mt-1 truncate">
+                      Destination: {uploadPcTargetFolderPath}
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Upload Media Category:
+                  </label>
+                  <select
+                    value={uploadPcCategory}
+                    onChange={e => setUploadPcCategory(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs font-medium text-slate-900 focus:outline-none focus:border-red-500"
+                  >
+                    <option value="RAW_PHOTO">RAW Photos (Stills, Keynotes & Portraits)</option>
+                    <option value="RAW_VIDEO">RAW Video / Vlogging (4K Clips & BTS)</option>
+                    <option value="EDITED_DRAFT">Review Drafts (Editing Timeline Versions)</option>
+                    <option value="FINAL_VIDEO">Approved Broadcast Deliverables (Final Reels)</option>
+                  </select>
+                  <p className="text-[10px] text-slate-500 mt-1">
+                    Tags media assets appropriately in MediaVerse Central Library.
+                  </p>
+                </div>
+              </div>
+
+              {/* Drag & Drop File Selector */}
+              <div
+                onDragOver={e => e.preventDefault()}
+                onDrop={e => {
+                  e.preventDefault();
+                  handleFilesSelected(e.dataTransfer.files);
+                }}
+                className="border-2 border-dashed border-slate-300 hover:border-red-500 bg-slate-50/70 hover:bg-red-50/30 rounded-2xl p-8 text-center transition-all cursor-pointer group"
+                onClick={() => document.getElementById('pc-upload-input-main')?.click()}
+              >
+                <input
+                  id="pc-upload-input-main"
+                  type="file"
+                  multiple
+                  className="hidden"
+                  onChange={e => handleFilesSelected(e.target.files)}
+                />
+                <div className="w-12 h-12 mx-auto mb-3 rounded-2xl bg-red-100 group-hover:bg-red-200 text-red-600 flex items-center justify-center transition-colors">
+                  <Upload className="w-6 h-6" />
+                </div>
+                <h4 className="text-sm font-bold text-slate-900 group-hover:text-red-700">
+                  Click to select files from your PC or drag & drop here
+                </h4>
+                <p className="text-xs text-slate-500 mt-1">
+                  Supports Photos (RAW, CR2, ARW, NEF, JPG, PNG) and 4K Videos (MP4, MOV, ProRes). Multiple files supported.
+                </p>
+              </div>
+
+              {/* Selected Files Queue */}
+              {uploadPcSelectedFiles.length > 0 && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-800">
+                      Selected Files Queue ({uploadPcSelectedFiles.length} files • {formatFileSize(uploadPcSelectedFiles.reduce((acc, f) => acc + f.size, 0))})
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setUploadPcSelectedFiles([])}
+                      className="text-xs text-rose-600 hover:underline font-bold"
+                    >
+                      Clear All
+                    </button>
+                  </div>
+
+                  <div className="max-h-60 overflow-y-auto space-y-1.5 border border-slate-200 rounded-xl p-2 bg-slate-50/50">
+                    {uploadPcSelectedFiles.map((file, idx) => (
+                      <div
+                        key={`${file.name}-${idx}`}
+                        className="flex items-center justify-between p-2.5 rounded-lg bg-white border border-slate-200 text-xs"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          {file.type.startsWith('video/') ? (
+                            <Film className="w-4 h-4 text-purple-600 shrink-0" />
+                          ) : file.type.startsWith('image/') ? (
+                            <Camera className="w-4 h-4 text-red-600 shrink-0" />
+                          ) : (
+                            <File className="w-4 h-4 text-slate-500 shrink-0" />
+                          )}
+                          <span className="font-bold text-slate-800 truncate block">
+                            {file.name}
                           </span>
+                          <span className="text-[10px] text-slate-400 font-mono shrink-0">
+                            ({formatFileSize(file.size)})
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleRemovePcFile(idx)}
+                          className="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50"
+                          title="Remove file"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Optional Metadata */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Description (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={uploadPcDescription}
+                    onChange={e => setUploadPcDescription(e.target.value)}
+                    placeholder="e.g. Day 1 Keynote Opening or Celebrity Vlog B-Roll"
+                    className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs text-slate-900 focus:outline-none focus:border-red-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Tags (Comma-separated)
+                  </label>
+                  <input
+                    type="text"
+                    value={uploadPcTags}
+                    onChange={e => setUploadPcTags(e.target.value)}
+                    placeholder="e.g. day1, ceremony, stage, 4k"
+                    className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs text-slate-900 focus:outline-none focus:border-red-500"
+                  />
+                </div>
+              </div>
+
+              {/* Upload Progress Bar */}
+              {isUploadingPc && (
+                <div className="p-4 rounded-xl bg-red-50 border border-red-200 space-y-2">
+                  <div className="flex items-center justify-between text-xs font-bold text-red-950">
+                    <span className="flex items-center gap-2">
+                      <RefreshCw className="w-4 h-4 animate-spin text-red-600" />
+                      <span>
+                        Uploading File {uploadPcCurrentFileIndex + 1} of {uploadPcSelectedFiles.length}: {uploadPcSelectedFiles[uploadPcCurrentFileIndex]?.name}
+                      </span>
+                    </span>
+                    <span>{uploadPcOverallProgress}%</span>
+                  </div>
+                  <div className="w-full h-2.5 rounded-full bg-red-200 overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-red-600 to-rose-600 transition-all duration-200"
+                      style={{ width: `${uploadPcOverallProgress}%` }}
+                    />
+                  </div>
+                  <p className="text-[11px] text-red-700">
+                    Direct streaming to Google Drive folder: <span className="font-mono font-bold">{uploadPcTargetFolderPath || 'Destination'}</span>
+                  </p>
+                </div>
+              )}
+
+              {/* Success Results Banner */}
+              {uploadPcSuccessResults.length > 0 && (
+                <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-xs font-bold text-emerald-950">
+                      <CheckCircle className="w-4 h-4 text-emerald-600" />
+                      <span>Successfully transferred {uploadPcSuccessResults.length} files to Google Drive!</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setUploadPcSuccessResults([])}
+                      className="text-xs text-emerald-800 font-bold hover:underline"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                  <div className="max-h-40 overflow-y-auto space-y-1 pt-1">
+                    {uploadPcSuccessResults.map((r, i) => (
+                      <div key={i} className="flex items-center justify-between text-xs bg-white/80 p-2 rounded-lg border border-emerald-100">
+                        <span className="font-bold text-slate-800 truncate mr-2">✓ {r.name}</span>
+                        {r.url && (
+                          <a
+                            href={r.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-red-600 hover:underline font-bold inline-flex items-center gap-1 shrink-0"
+                          >
+                            <span>Open in Drive</span>
+                            <ExternalLink className="w-3 h-3" />
+                          </a>
                         )}
                       </div>
-                    );
-                  })
-                )}
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Execute Button */}
+              <div className="pt-2 flex justify-end">
+                <button
+                  type="button"
+                  onClick={handleExecutePcUpload}
+                  disabled={isUploadingPc || uploadPcSelectedFiles.length === 0 || !uploadPcTargetFolderId}
+                  className="px-6 py-3 rounded-xl text-xs font-bold bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 disabled:opacity-50 text-white shadow-xs transition-all flex items-center gap-2 cursor-pointer"
+                >
+                  {isUploadingPc ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>Transferring from PC to Google Drive...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="w-4 h-4" />
+                      <span>Upload & Transfer to Google Drive ({uploadPcSelectedFiles.length} Files)</span>
+                    </>
+                  )}
+                </button>
               </div>
             </div>
-
-            {/* Execute Button */}
-            <div className="pt-2 flex justify-end">
-              <button
-                onClick={handleExecuteDataTransfer}
-                disabled={isTransferring || selectedAssetIds.length === 0 || !transferTargetFolderId}
-                className="px-6 py-3 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white shadow-xs transition-colors flex items-center gap-2"
-              >
-                {isTransferring ? (
-                  <>
-                    <RefreshCw className="w-4 h-4 animate-spin" />
-                    <span>Transferring in Google Drive...</span>
-                  </>
-                ) : (
-                  <>
-                    <ArrowRightLeft className="w-4 h-4" />
-                    <span>Start Data Transfer ({selectedAssetIds.length} Assets)</span>
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
+          )}
         </div>
       )}
 
@@ -1879,6 +2398,19 @@ export const DriveSettingsPage: React.FC = () => {
                         </div>
 
                         <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowInspectModal(false);
+                              handleOpenUploadPcModal(inspectingDrive, sub.driveFolderId);
+                            }}
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-bold bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 transition-colors cursor-pointer"
+                            title={`Upload files from PC directly into ${sub.name}`}
+                          >
+                            <Upload className="w-3 h-3" />
+                            <span>Upload</span>
+                          </button>
+
                           <button
                             onClick={() => {
                               setRenamingSubfolderId(sub.id);
@@ -2278,6 +2810,221 @@ export const DriveSettingsPage: React.FC = () => {
             </button>
           </div>
         </form>
+      </Modal>
+
+      {/* ================================================= */}
+      {/* MODAL: DIRECT PC FILE UPLOAD */}
+      {/* ================================================= */}
+      <Modal
+        isOpen={showUploadPcModal}
+        onClose={() => setShowUploadPcModal(false)}
+        title="Upload Files from PC to Google Drive"
+      >
+        <div className="space-y-4">
+          <p className="text-xs text-slate-500">
+            Upload RAW photos, 4K camera videos, or edited cuts directly from your computer into the chosen Google Drive folder or personal member subfolder.
+          </p>
+
+          {/* Destination Selection */}
+          <div className="space-y-1">
+            <label className="block text-xs font-bold text-slate-700">
+              Target Destination Folder / Subfolder <span className="text-red-500">*</span>
+            </label>
+            <select
+              value={uploadPcTargetFolderId}
+              onChange={e => {
+                const selId = e.target.value;
+                setUploadPcTargetFolderId(selId);
+                const info = resolveTargetFolderInfo(selId);
+                setUploadPcTargetFolderPath(info.folderPath);
+              }}
+              className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs font-medium text-slate-900 focus:outline-none focus:border-red-500"
+            >
+              <option value="">-- Choose Target Destination --</option>
+              {memberDrives.length > 0 && (
+                <optgroup label="👤 Personal Member Drives & Subfolders">
+                  {memberDrives.map(drive => (
+                    <React.Fragment key={drive.id}>
+                      <option value={drive.driveFolderId}>
+                        📁 {drive.memberName} [Root Drive] ({drive.role})
+                      </option>
+                      {drive.subfolders?.map(sub => (
+                        <option key={sub.id} value={sub.driveFolderId}>
+                          &nbsp;&nbsp;&nbsp;&nbsp;↳ 📂 {drive.memberName} / {sub.name}
+                        </option>
+                      ))}
+                    </React.Fragment>
+                  ))}
+                </optgroup>
+              )}
+              <optgroup label="🏛️ SAVISKAR 2026 Master Hierarchy">
+                {flatList.map(item => (
+                  <option key={item.path} value={item.driveFolderId || item.path}>
+                    📁 {item.name} ({item.path})
+                  </option>
+                ))}
+              </optgroup>
+            </select>
+            {uploadPcTargetFolderPath && (
+              <p className="text-[10px] text-slate-500 font-mono mt-0.5 truncate">
+                Target: {uploadPcTargetFolderPath}
+              </p>
+            )}
+          </div>
+
+          {/* Category */}
+          <div className="space-y-1">
+            <label className="block text-xs font-bold text-slate-700">
+              Asset Category
+            </label>
+            <select
+              value={uploadPcCategory}
+              onChange={e => setUploadPcCategory(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs font-medium text-slate-900 focus:outline-none focus:border-red-500"
+            >
+              <option value="RAW_PHOTO">RAW Photos (Stills, Keynotes & Portraits)</option>
+              <option value="RAW_VIDEO">RAW Video / Vlogging (4K Footage & BTS)</option>
+              <option value="EDITED_DRAFT">Review Drafts (Editing Timeline Versions)</option>
+              <option value="FINAL_VIDEO">Approved Deliverables (Final Social Reels)</option>
+            </select>
+          </div>
+
+          {/* Drag & Drop Zone */}
+          <div
+            onDragOver={e => e.preventDefault()}
+            onDrop={e => {
+              e.preventDefault();
+              handleFilesSelected(e.dataTransfer.files);
+            }}
+            onClick={() => document.getElementById('pc-modal-file-input')?.click()}
+            className="border-2 border-dashed border-slate-300 hover:border-red-500 bg-slate-50 hover:bg-red-50/20 rounded-2xl p-6 text-center transition-all cursor-pointer group"
+          >
+            <input
+              id="pc-modal-file-input"
+              type="file"
+              multiple
+              className="hidden"
+              onChange={e => handleFilesSelected(e.target.files)}
+            />
+            <div className="w-10 h-10 mx-auto mb-2 rounded-xl bg-red-100 group-hover:bg-red-200 text-red-600 flex items-center justify-center transition-colors">
+              <Upload className="w-5 h-5" />
+            </div>
+            <p className="text-xs font-bold text-slate-800 group-hover:text-red-700">
+              Select files from your PC or drag & drop here
+            </p>
+            <p className="text-[11px] text-slate-400 mt-0.5">
+              Multi-file support (Photos, 4K Footage, Projects)
+            </p>
+          </div>
+
+          {/* Selected Files List */}
+          {uploadPcSelectedFiles.length > 0 && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-800">
+                  {uploadPcSelectedFiles.length} files selected ({formatFileSize(uploadPcSelectedFiles.reduce((acc, f) => acc + f.size, 0))})
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setUploadPcSelectedFiles([])}
+                  className="text-xs text-rose-600 hover:underline font-bold"
+                >
+                  Clear All
+                </button>
+              </div>
+              <div className="max-h-40 overflow-y-auto space-y-1 border border-slate-200 rounded-xl p-2 bg-slate-50/50">
+                {uploadPcSelectedFiles.map((file, idx) => (
+                  <div key={`${file.name}-${idx}`} className="flex items-center justify-between p-2 rounded-lg bg-white border border-slate-200 text-xs">
+                    <span className="font-bold text-slate-800 truncate mr-2">{file.name}</span>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="text-[10px] text-slate-400 font-mono">({formatFileSize(file.size)})</span>
+                      <button
+                        type="button"
+                        onClick={() => handleRemovePcFile(idx)}
+                        className="text-slate-400 hover:text-rose-600"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Progress Bar */}
+          {isUploadingPc && (
+            <div className="p-3.5 rounded-xl bg-red-50 border border-red-200 space-y-2">
+              <div className="flex items-center justify-between text-xs font-bold text-red-950">
+                <span className="flex items-center gap-1.5">
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin text-red-600" />
+                  <span>File {uploadPcCurrentFileIndex + 1} of {uploadPcSelectedFiles.length} ({uploadPcCurrentProgress}%)</span>
+                </span>
+                <span>{uploadPcOverallProgress}%</span>
+              </div>
+              <div className="w-full h-2 rounded-full bg-red-200 overflow-hidden">
+                <div
+                  className="h-full bg-red-600 transition-all duration-200"
+                  style={{ width: `${uploadPcOverallProgress}%` }}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Success Banner */}
+          {uploadPcSuccessResults.length > 0 && (
+            <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 space-y-2">
+              <div className="flex items-center justify-between text-xs font-bold text-emerald-950">
+                <span className="flex items-center gap-1.5">
+                  <CheckCircle className="w-4 h-4 text-emerald-600" />
+                  <span>Uploaded {uploadPcSuccessResults.length} files successfully!</span>
+                </span>
+              </div>
+              <div className="max-h-32 overflow-y-auto space-y-1">
+                {uploadPcSuccessResults.map((r, i) => (
+                  <div key={i} className="flex items-center justify-between text-xs bg-white/80 p-1.5 rounded border border-emerald-100">
+                    <span className="font-bold text-slate-800 truncate mr-2">✓ {r.name}</span>
+                    {r.url && (
+                      <a href={r.url} target="_blank" rel="noreferrer" className="text-red-600 hover:underline font-bold inline-flex items-center gap-1 shrink-0">
+                        <span>Drive</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Actions */}
+          <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+            <button
+              type="button"
+              onClick={() => setShowUploadPcModal(false)}
+              className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 transition-colors"
+            >
+              Close
+            </button>
+            <button
+              type="button"
+              onClick={handleExecutePcUpload}
+              disabled={isUploadingPc || uploadPcSelectedFiles.length === 0 || !uploadPcTargetFolderId}
+              className="px-5 py-2.5 rounded-xl text-xs font-bold bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 disabled:opacity-50 text-white shadow-xs transition-all flex items-center gap-2 cursor-pointer"
+            >
+              {isUploadingPc ? (
+                <>
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  <span>Uploading to Drive...</span>
+                </>
+              ) : (
+                <>
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>Start Upload ({uploadPcSelectedFiles.length} Files)</span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
       </Modal>
     </div>
   );

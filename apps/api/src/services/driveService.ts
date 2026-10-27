@@ -1451,6 +1451,34 @@ export class DriveService {
     let destinationFolderId = (options.targetFolderId || '').trim();
     let finalFolderPath = (options.targetFolderPath || '').trim();
 
+    // Check if targetFolderId belongs to an offline-prefixed member subfolder or root
+    if (destinationFolderId && (destinationFolderId.startsWith('sub-') || destinationFolderId.startsWith('member-drive-'))) {
+      let resolvedRealId = '';
+      for (const md of this.memberDrives) {
+        const matchingSub = md.subfolders?.find(s => s.driveFolderId === destinationFolderId || s.id === destinationFolderId);
+        if (matchingSub) {
+          if (md.driveFolderId && !md.driveFolderId.startsWith('member-drive-')) {
+            try {
+              resolvedRealId = await this.getOrCreateDriveFolder(matchingSub.name, md.driveFolderId);
+              matchingSub.driveFolderId = resolvedRealId;
+              matchingSub.driveWebUrl = `https://drive.google.com/drive/folders/${resolvedRealId}`;
+              this.saveMemberDrivesToDisk();
+            } catch {
+              resolvedRealId = md.driveFolderId;
+            }
+          }
+          break;
+        }
+        if (md.driveFolderId === destinationFolderId || md.id === destinationFolderId) {
+          if (md.driveFolderId && !md.driveFolderId.startsWith('member-drive-')) {
+            resolvedRealId = md.driveFolderId;
+          }
+          break;
+        }
+      }
+      destinationFolderId = resolvedRealId || (await this.resolveRootFolderId()).id;
+    }
+
     if (!destinationFolderId) {
       const dest = options.destination || this.resolveDestination();
       if (dest.driveFolderId && !dest.driveFolderId.startsWith('sav26-')) {
@@ -1538,7 +1566,35 @@ export class DriveService {
 
     // 1. Ultra-fast direct check from targetFolderId (0ms lookup)
     if (targetFolderId && targetFolderId.trim() && !targetFolderId.startsWith('sav26-')) {
-      destinationFolderId = targetFolderId.trim();
+      const cleanTargetId = targetFolderId.trim();
+      if (cleanTargetId.startsWith('sub-') || cleanTargetId.startsWith('member-drive-')) {
+        let resolvedRealId = '';
+        for (const md of this.memberDrives) {
+          const matchingSub = md.subfolders?.find(s => s.driveFolderId === cleanTargetId || s.id === cleanTargetId);
+          if (matchingSub) {
+            if (md.driveFolderId && !md.driveFolderId.startsWith('member-drive-')) {
+              try {
+                resolvedRealId = await this.getOrCreateDriveFolder(matchingSub.name, md.driveFolderId);
+                matchingSub.driveFolderId = resolvedRealId;
+                matchingSub.driveWebUrl = `https://drive.google.com/drive/folders/${resolvedRealId}`;
+                this.saveMemberDrivesToDisk();
+              } catch {
+                resolvedRealId = md.driveFolderId;
+              }
+            }
+            break;
+          }
+          if (md.driveFolderId === cleanTargetId || md.id === cleanTargetId) {
+            if (md.driveFolderId && !md.driveFolderId.startsWith('member-drive-')) {
+              resolvedRealId = md.driveFolderId;
+            }
+            break;
+          }
+        }
+        destinationFolderId = resolvedRealId || (await this.resolveRootFolderId()).id;
+      } else {
+        destinationFolderId = cleanTargetId;
+      }
       finalFolderPath = targetFolderPath || 'Selected Google Drive Folder';
     } else if (targetFolderPath && targetFolderPath.trim()) {
       if (this.folderIdCache.has(targetFolderPath.trim())) {
@@ -3195,9 +3251,36 @@ export class DriveService {
     const token = await this.getValidAccessToken();
     const transferredItems: any[] = [];
 
+    // Resolve targetFolderId if it points to an offline or newly created subfolder
+    let realTargetDriveId = targetFolderId;
+    if (token && (targetFolderId.startsWith('sub-') || targetFolderId.startsWith('member-drive-'))) {
+      for (const md of this.memberDrives) {
+        const matchingSub = md.subfolders?.find(s => s.driveFolderId === targetFolderId || s.id === targetFolderId);
+        if (matchingSub) {
+          if (md.driveFolderId && !md.driveFolderId.startsWith('member-drive-')) {
+            try {
+              realTargetDriveId = await this.getOrCreateDriveFolder(matchingSub.name, md.driveFolderId);
+              matchingSub.driveFolderId = realTargetDriveId;
+              matchingSub.driveWebUrl = `https://drive.google.com/drive/folders/${realTargetDriveId}`;
+              this.saveMemberDrivesToDisk();
+            } catch {
+              realTargetDriveId = md.driveFolderId;
+            }
+          }
+          break;
+        }
+        if (md.driveFolderId === targetFolderId || md.id === targetFolderId) {
+          if (md.driveFolderId && !md.driveFolderId.startsWith('member-drive-')) {
+            realTargetDriveId = md.driveFolderId;
+          }
+          break;
+        }
+      }
+    }
+
     for (const asset of targetAssets) {
       // 1. Move Google Drive file if drive_file_id exists and token available
-      if (token && asset.drive_file_id && !asset.drive_file_id.startsWith('mock-') && !targetFolderId.startsWith('sub-')) {
+      if (token && asset.drive_file_id && !asset.drive_file_id.startsWith('mock-') && !realTargetDriveId.startsWith('sub-') && !realTargetDriveId.startsWith('member-drive-')) {
         try {
           // Fetch existing parents
           const metaRes = await fetch(
@@ -3208,9 +3291,9 @@ export class DriveService {
             const meta = (await metaRes.json()) as any;
             const currentParents = (meta.parents || []).join(',');
 
-            // Move file to targetFolderId
+            // Move file to realTargetDriveId
             await fetch(
-              `https://www.googleapis.com/drive/v3/files/${asset.drive_file_id}?addParents=${targetFolderId}&removeParents=${currentParents}&supportsAllDrives=true`,
+              `https://www.googleapis.com/drive/v3/files/${asset.drive_file_id}?addParents=${realTargetDriveId}&removeParents=${currentParents}&supportsAllDrives=true`,
               {
                 method: 'PATCH',
                 headers: {
@@ -3219,7 +3302,7 @@ export class DriveService {
                 }
               }
             );
-            console.log(`[DriveService] Transferred Drive file ${asset.drive_file_id} into folder ${targetFolderId}`);
+            console.log(`[DriveService] Transferred Drive file ${asset.drive_file_id} into folder ${realTargetDriveId}`);
           }
         } catch (err: any) {
           console.warn(`[DriveService] Cloud file transfer notice: ${err.message}`);
