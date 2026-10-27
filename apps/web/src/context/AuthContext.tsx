@@ -35,21 +35,56 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<UserProfile | null>(null);
-  const [activeRole, setActiveRole] = useState<UserRole>('MEDIA_COORDINATOR');
+  // Instantly remember user from localStorage so there's 0ms logout flicker or lost sessions
+  const [user, setUser] = useState<UserProfile | null>(() => {
+    try {
+      const stored = localStorage.getItem('mediaverse_user_profile');
+      if (stored) return JSON.parse(stored);
+    } catch {}
+    return null;
+  });
+
+  const [activeRole, setActiveRole] = useState<UserRole>(() => {
+    try {
+      const stored = localStorage.getItem('mediaverse_user_profile');
+      if (stored) {
+        const u = JSON.parse(stored);
+        if (u.roles && u.roles.length > 0) return u.roles[0];
+      }
+    } catch {}
+    return 'MEDIA_COORDINATOR';
+  });
+
   const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
 
   const refreshUser = async () => {
+    const token = localStorage.getItem('mediaverse_auth_token');
+    const activeUserId = localStorage.getItem('mediaverse_active_user_id');
+    if (!token && !activeUserId) {
+      setIsLoading(false);
+      return;
+    }
+
     try {
       const currentUser = await api.getCurrentUser();
-      setUser(currentUser);
-      if (currentUser.roles && currentUser.roles.length > 0) {
-        setActiveRole(currentUser.roles[0]);
+      if (currentUser && currentUser.id) {
+        setUser(currentUser);
+        localStorage.setItem('mediaverse_user_profile', JSON.stringify(currentUser));
+        if (currentUser.roles && currentUser.roles.length > 0) {
+          setActiveRole(prev => (currentUser.roles.includes(prev) ? prev : currentUser.roles[0]));
+        }
       }
-    } catch (err) {
-      console.warn('Failed to load active user, falling back to Coordinator', err);
+    } catch (err: any) {
+      console.warn('Could not validate current user with server:', err.message);
+      // Only clear if explicitly unauthorized 401
+      if (err.message && err.message.toLowerCase().includes('unauthorized')) {
+        localStorage.removeItem('mediaverse_user_profile');
+        localStorage.removeItem('mediaverse_active_user_id');
+        localStorage.removeItem('mediaverse_auth_token');
+        setUser(null);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -74,6 +109,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const res = await api.login({ email, password });
       setUser(res.user);
+      localStorage.setItem('mediaverse_user_profile', JSON.stringify(res.user));
+      localStorage.setItem('mediaverse_active_user_id', res.user.id);
+      localStorage.setItem('mediaverse_auth_token', res.token);
       if (res.user.roles && res.user.roles.length > 0) {
         setActiveRole(res.user.roles[0]);
       }
@@ -95,6 +133,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const res = await api.register(payload);
       setUser(res.user);
+      localStorage.setItem('mediaverse_user_profile', JSON.stringify(res.user));
+      localStorage.setItem('mediaverse_active_user_id', res.user.id);
+      localStorage.setItem('mediaverse_auth_token', res.token);
       if (res.user.roles && res.user.roles.length > 0) {
         setActiveRole(res.user.roles[0]);
       }
@@ -106,6 +147,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = () => {
+    localStorage.removeItem('mediaverse_user_profile');
     localStorage.removeItem('mediaverse_active_user_id');
     localStorage.removeItem('mediaverse_auth_token');
     // Default to first user or unauthenticated
@@ -118,6 +160,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setIsLoading(true);
       const res = await api.switchDevRole(role);
       setUser(res.user);
+      localStorage.setItem('mediaverse_user_profile', JSON.stringify(res.user));
+      localStorage.setItem('mediaverse_active_user_id', res.user.id);
+      localStorage.setItem('mediaverse_auth_token', res.token);
       setActiveRole(role);
     } catch (err) {
       console.error('Failed to switch role', err);

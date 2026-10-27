@@ -10,17 +10,7 @@ export interface AuthenticatedRequest extends Request {
 }
 
 export function authMiddleware(req: AuthenticatedRequest, res: Response, next: NextFunction) {
-  // 1. Check for custom user header (useful for rapid UI testing / role switching)
-  const devUserId = req.headers['x-user-id'] as string;
-  if (devUserId) {
-    const profile = db.profiles.find(p => p.id === devUserId && p.is_active);
-    if (profile) {
-      req.user = profile;
-      return next();
-    }
-  }
-
-  // 2. Check Authorization Bearer header
+  // 1. Check Authorization Bearer header first (most authentic token verification)
   const authHeader = req.headers.authorization;
   if (authHeader && authHeader.startsWith('Bearer ')) {
     const token = authHeader.substring(7);
@@ -40,6 +30,17 @@ export function authMiddleware(req: AuthenticatedRequest, res: Response, next: N
         req.user = profile;
         return next();
       }
+    }
+  }
+
+  // 2. Check for custom user header (useful for rapid UI testing / role switching)
+  const devUserId = req.headers['x-user-id'] as string;
+  if (devUserId) {
+    const profile = db.profiles.find(p => p.id === devUserId && p.is_active)
+                 || AuthService.getProfileById(devUserId);
+    if (profile) {
+      req.user = profile;
+      return next();
     }
   }
 

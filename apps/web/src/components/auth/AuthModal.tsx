@@ -33,6 +33,20 @@ const quickCrewProfiles: {
   badge: string;
 }[] = [
   {
+    name: 'Prof. Rajesh Sharma',
+    role: 'SUPER_ADMIN',
+    email: 'admin@dsa.cgc.edu.in',
+    icon: ShieldCheck,
+    badge: 'bg-purple-100 text-purple-900 border-purple-300'
+  },
+  {
+    name: 'Priya Patel',
+    role: 'MEDIA_COORDINATOR',
+    email: 'coordinator@dsa.cgc.edu.in',
+    icon: ClipboardList,
+    badge: 'bg-red-50 text-red-700 border-red-200'
+  },
+  {
     name: 'Rohan Singh',
     role: 'PHOTOGRAPHER',
     email: 'photographer@dsa.cgc.edu.in',
@@ -52,20 +66,6 @@ const quickCrewProfiles: {
     email: 'editor@dsa.cgc.edu.in',
     icon: Sparkles,
     badge: 'bg-purple-50 text-purple-800 border-purple-200'
-  },
-  {
-    name: 'Priya Patel',
-    role: 'MEDIA_COORDINATOR',
-    email: 'coordinator@dsa.cgc.edu.in',
-    icon: ClipboardList,
-    badge: 'bg-red-50 text-red-700 border-red-200'
-  },
-  {
-    name: 'Prof. Rajesh Sharma',
-    role: 'SUPER_ADMIN',
-    email: 'admin@dsa.cgc.edu.in',
-    icon: ShieldCheck,
-    badge: 'bg-slate-100 text-slate-800 border-slate-300'
   }
 ];
 
@@ -434,11 +434,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                 onChange={e => setRegRole(e.target.value as UserRole)}
                 className="w-full px-3.5 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs font-semibold text-slate-900 focus:outline-none focus:border-red-500"
               >
+                <option value="SUPER_ADMIN">👑 Super Admin — Full master access & Drive Studio control</option>
+                <option value="MEDIA_COORDINATOR">🛡️ Admin (Media Coordinator) — Crew lead, operations & assignments</option>
                 <option value="PHOTOGRAPHER">📸 Photographer — Photo coverage & RAW uploads</option>
                 <option value="VIDEOGRAPHER">🎥 Videographer — 4K video clips & camera stems</option>
                 <option value="VIDEO_EDITOR">🎬 Video Editor — Reels, edits & assembly drafts</option>
-                <option value="MEDIA_COORDINATOR">📋 Media Coordinator — Task planning & lead</option>
                 <option value="REVIEWER">🔍 Reviewer — QC, approval & feedback</option>
+                <option value="PRESIDENT">🎓 President / Leadership — Executive festival oversight</option>
               </select>
             </div>
 

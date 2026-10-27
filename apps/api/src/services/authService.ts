@@ -16,6 +16,7 @@ export interface StoredUserCredential {
 }
 
 const USERS_FILE_NAME = '.registered_users.json';
+const PROFILES_FILE_NAME = '.registered_profiles.json';
 
 function getUsersFilePaths(): string[] {
   return [
@@ -26,6 +27,15 @@ function getUsersFilePaths(): string[] {
   ];
 }
 
+function getProfilesFilePaths(): string[] {
+  return [
+    path.join(process.cwd(), PROFILES_FILE_NAME),
+    path.join(process.cwd(), 'apps', 'api', PROFILES_FILE_NAME),
+    path.resolve(__dirname, '../../', PROFILES_FILE_NAME),
+    path.resolve(__dirname, '../../../', PROFILES_FILE_NAME)
+  ];
+}
+
 function resolveUsersFilePath(): string {
   for (const p of getUsersFilePaths()) {
     if (fs.existsSync(p)) return p;
@@ -33,11 +43,20 @@ function resolveUsersFilePath(): string {
   return path.join(process.cwd(), USERS_FILE_NAME);
 }
 
+function resolveProfilesFilePath(): string {
+  for (const p of getProfilesFilePaths()) {
+    if (fs.existsSync(p)) return p;
+  }
+  return path.join(process.cwd(), PROFILES_FILE_NAME);
+}
+
 export class AuthService {
   private static credentials: StoredUserCredential[] = [];
+  private static registeredProfiles: UserProfile[] = [];
 
   static init(): void {
     this.loadCredentialsFromDisk();
+    this.loadProfilesFromDisk();
   }
 
   static loadCredentialsFromDisk(): void {
@@ -58,6 +77,34 @@ export class AuthService {
     }
   }
 
+  static loadProfilesFromDisk(): void {
+    try {
+      for (const p of getProfilesFilePaths()) {
+        if (fs.existsSync(p)) {
+          const raw = fs.readFileSync(p, 'utf-8');
+          const data = JSON.parse(raw);
+          if (Array.isArray(data)) {
+            this.registeredProfiles = data;
+            for (const profile of data) {
+              const existingIdx = db.profiles.findIndex(
+                p => p.id === profile.id || p.email.toLowerCase() === profile.email.toLowerCase()
+              );
+              if (existingIdx >= 0) {
+                db.profiles[existingIdx] = profile;
+              } else {
+                db.profiles.push(profile);
+              }
+            }
+            console.log(`[AuthService] Loaded ${data.length} registered profiles from ${p} and synced into memoryStore.`);
+            return;
+          }
+        }
+      }
+    } catch (err: any) {
+      console.warn('[AuthService] Could not load persisted user profiles:', err.message);
+    }
+  }
+
   static saveCredentialsToDisk(): void {
     try {
       const targetPath = resolveUsersFilePath();
@@ -66,6 +113,32 @@ export class AuthService {
     } catch (err: any) {
       console.warn('[AuthService] Failed to persist credentials to disk:', err.message);
     }
+  }
+
+  static saveProfilesToDisk(): void {
+    try {
+      const targetPath = resolveProfilesFilePath();
+      fs.writeFileSync(targetPath, JSON.stringify(this.registeredProfiles, null, 2), 'utf-8');
+      console.log(`[AuthService] Persisted ${this.registeredProfiles.length} user profiles to ${targetPath}`);
+    } catch (err: any) {
+      console.warn('[AuthService] Failed to persist profiles to disk:', err.message);
+    }
+  }
+
+  static saveRegisteredProfile(profile: UserProfile): void {
+    const idx = this.registeredProfiles.findIndex(
+      p => p.id === profile.id || p.email.toLowerCase() === profile.email.toLowerCase()
+    );
+    if (idx >= 0) {
+      this.registeredProfiles[idx] = profile;
+    } else {
+      this.registeredProfiles.push(profile);
+    }
+    this.saveProfilesToDisk();
+  }
+
+  static getProfileById(id: string): UserProfile | undefined {
+    return db.profiles.find(p => p.id === id) || this.registeredProfiles.find(p => p.id === id);
   }
 
   static hashPassword(password: string, salt: string): string {
@@ -160,8 +233,9 @@ export class AuthService {
       updated_at: new Date().toISOString()
     };
 
-    // Store in memory
+    // Store in memory & persist registered profile
     db.profiles.push(newProfile);
+    this.saveRegisteredProfile(newProfile);
 
     // Save credential to disk
     this.credentials.push({
@@ -194,8 +268,28 @@ export class AuthService {
       throw new Error('Email is required to sign in.');
     }
 
-    // Look for matching user in memoryStore (which includes seeded & registered users)
-    const profile = db.profiles.find(p => p.email.toLowerCase() === cleanEmail);
+    // Look for matching user in memoryStore or registeredProfiles
+    let profile = db.profiles.find(p => p.email.toLowerCase() === cleanEmail)
+               || this.registeredProfiles.find(p => p.email.toLowerCase() === cleanEmail);
+
+    const cred = this.credentials.find(c => c.email.toLowerCase() === cleanEmail);
+
+    // Fallback: If user was registered before server restart, rehydrate profile
+    if (!profile && cred) {
+      profile = {
+        id: cred.id,
+        email: cleanEmail,
+        full_name: cleanEmail.split('@')[0],
+        phone: '+91 9876543210',
+        is_active: true,
+        roles: ['PHOTOGRAPHER'],
+        created_at: cred.created_at,
+        updated_at: cred.created_at
+      };
+      db.profiles.push(profile);
+      this.saveRegisteredProfile(profile);
+    }
+
     if (!profile) {
       throw new Error(`No crew account found for "${cleanEmail}". Please check your email or register.`);
     }
@@ -205,12 +299,16 @@ export class AuthService {
     }
 
     // Check credentials if password provided
-    const cred = this.credentials.find(c => c.email.toLowerCase() === cleanEmail);
     if (cred && password) {
       const computedHash = this.hashPassword(password, cred.password_salt);
       if (computedHash !== cred.password_hash) {
         throw new Error('Incorrect password. Please try again.');
       }
+    }
+
+    // Ensure user is present in memory
+    if (!db.profiles.some(p => p.id === profile!.id)) {
+      db.profiles.push(profile);
     }
 
     const roles: UserRole[] = Array.isArray(profile.roles) && profile.roles.length > 0 ? (profile.roles as UserRole[]) : ['PHOTOGRAPHER'];
@@ -233,9 +331,32 @@ export class AuthService {
 
       if (decoded && (decoded.sub || decoded.id)) {
         const userId = decoded.sub || decoded.id;
-        const profile = db.profiles.find(p => p.id === userId || p.email === decoded.email);
+        const cleanEmail = (decoded.email || '').toLowerCase();
+        const profile = db.profiles.find(p => p.id === userId || (cleanEmail && p.email?.toLowerCase() === cleanEmail))
+                     || this.registeredProfiles.find(p => p.id === userId || (cleanEmail && p.email?.toLowerCase() === cleanEmail));
+
         if (profile && profile.is_active) {
+          if (!db.profiles.some(p => p.id === profile.id)) {
+            db.profiles.push(profile);
+          }
           return profile;
+        }
+
+        // Resilient Token Fallback: Reconstruct profile from verified JWT so users NEVER get kicked out
+        if (cleanEmail) {
+          const restored: UserProfile = {
+            id: userId,
+            email: cleanEmail,
+            full_name: decoded.name || cleanEmail.split('@')[0],
+            phone: '+91 9876543210',
+            is_active: true,
+            roles: Array.isArray(decoded.roles) && decoded.roles.length > 0 ? decoded.roles : ['PHOTOGRAPHER'],
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          };
+          db.profiles.push(restored);
+          this.saveRegisteredProfile(restored);
+          return restored;
         }
       }
     } catch {}

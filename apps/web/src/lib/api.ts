@@ -72,6 +72,7 @@ class ApiClient {
     });
     localStorage.setItem('mediaverse_active_user_id', data.user.id);
     localStorage.setItem('mediaverse_auth_token', data.token);
+    localStorage.setItem('mediaverse_user_profile', JSON.stringify(data.user));
     return data;
   }
 
@@ -88,6 +89,7 @@ class ApiClient {
     });
     localStorage.setItem('mediaverse_active_user_id', data.user.id);
     localStorage.setItem('mediaverse_auth_token', data.token);
+    localStorage.setItem('mediaverse_user_profile', JSON.stringify(data.user));
     return data;
   }
 
@@ -98,6 +100,7 @@ class ApiClient {
     });
     localStorage.setItem('mediaverse_active_user_id', data.user.id);
     localStorage.setItem('mediaverse_auth_token', data.token);
+    localStorage.setItem('mediaverse_user_profile', JSON.stringify(data.user));
     return data;
   }
 
