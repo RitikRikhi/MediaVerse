@@ -488,3 +488,272 @@ driveRouter.delete('/my-drive/folders/:folderId', authMiddleware, async (req: Au
     });
   }
 });
+
+// ==========================================
+// Super Admin Member Gmail-Wise Drives
+// ==========================================
+
+// 1. List all member drives (Super Admin / Coordinator)
+driveRouter.get('/member-drives', authMiddleware, async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    const list = DriveService.getAllMemberDrives();
+    res.json({
+      success: true,
+      data: list
+    });
+  } catch (err: any) {
+    res.status(500).json({
+      success: false,
+      error: { code: 'MEMBER_DRIVES_FAILED', message: err.message || 'Failed to retrieve member drives' }
+    });
+  }
+});
+
+// 2. Create drive for any member Gmail (Super Admin / Coordinator)
+driveRouter.post('/member-drives', authMiddleware, requireRoles('SUPER_ADMIN', 'MEDIA_COORDINATOR', 'PRESIDENT'), async (req: AuthenticatedRequest, res: Response) => {
+  const { memberEmail, memberName, role, customSubfolders } = req.body;
+
+  if (!memberEmail || !memberName) {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'INVALID_INPUT', message: 'memberEmail and memberName are required' }
+    });
+  }
+
+  try {
+    const createdDrive = await DriveService.createMemberDriveForGmail({
+      adminUser: req.user!,
+      memberEmail,
+      memberName,
+      role: role || 'PHOTOGRAPHER',
+      customSubfolders
+    });
+
+    AuditService.log({
+      actorId: req.user!.id,
+      actorName: req.user!.full_name,
+      actorRole: req.user!.roles[0],
+      action: 'CREATE_MEMBER_GMAIL_DRIVE',
+      entityType: 'FOLDER',
+      entityId: createdDrive.driveFolderId,
+      details: {
+        memberEmail,
+        memberName,
+        role,
+        driveUrl: createdDrive.driveWebUrl,
+        subfoldersCount: createdDrive.subfolders.length
+      }
+    });
+
+    res.status(201).json({
+      success: true,
+      data: createdDrive
+    });
+  } catch (err: any) {
+    res.status(400).json({
+      success: false,
+      error: { code: 'CREATE_MEMBER_DRIVE_FAILED', message: err.message || 'Failed to create member drive' }
+    });
+  }
+});
+
+// 3. Get single member drive details
+driveRouter.get('/member-drives/:id', authMiddleware, (req: AuthenticatedRequest, res: Response) => {
+  const drive = DriveService.getMemberDriveById(req.params.id);
+  if (!drive) {
+    return res.status(404).json({
+      success: false,
+      error: { code: 'NOT_FOUND', message: 'Member drive not found' }
+    });
+  }
+  res.json({
+    success: true,
+    data: drive
+  });
+});
+
+// 4. Add subfolder inside a member's drive
+driveRouter.post('/member-drives/:id/subfolders', authMiddleware, requireRoles('SUPER_ADMIN', 'MEDIA_COORDINATOR', 'PRESIDENT'), async (req: AuthenticatedRequest, res: Response) => {
+  const { folderName, parentFolderId } = req.body;
+  if (!folderName || !folderName.trim()) {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'INVALID_INPUT', message: 'folderName is required' }
+    });
+  }
+
+  try {
+    const subfolder = await DriveService.addMemberDriveSubfolder(req.params.id, folderName.trim(), parentFolderId);
+    AuditService.log({
+      actorId: req.user!.id,
+      actorName: req.user!.full_name,
+      actorRole: req.user!.roles[0],
+      action: 'ADD_MEMBER_DRIVE_SUBFOLDER',
+      entityType: 'FOLDER',
+      entityId: subfolder.driveFolderId,
+      details: { memberDriveId: req.params.id, folderName }
+    });
+    res.status(201).json({ success: true, data: subfolder });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: { message: err.message } });
+  }
+});
+
+// 5. Rename a folder/subfolder inside a member's drive
+driveRouter.patch('/member-drives/:id/folders/:folderId', authMiddleware, requireRoles('SUPER_ADMIN', 'MEDIA_COORDINATOR', 'PRESIDENT'), async (req: AuthenticatedRequest, res: Response) => {
+  const { newName } = req.body;
+  if (!newName || !newName.trim()) {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'INVALID_INPUT', message: 'newName is required' }
+    });
+  }
+
+  try {
+    const updated = await DriveService.renameMemberDriveFolder(req.params.id, req.params.folderId, newName.trim());
+    AuditService.log({
+      actorId: req.user!.id,
+      actorName: req.user!.full_name,
+      actorRole: req.user!.roles[0],
+      action: 'RENAME_MEMBER_DRIVE_FOLDER',
+      entityType: 'FOLDER',
+      entityId: req.params.folderId,
+      details: { memberDriveId: req.params.id, newName }
+    });
+    res.json({ success: true, data: updated });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: { message: err.message } });
+  }
+});
+
+// 6. Delete a subfolder inside a member's drive
+driveRouter.delete('/member-drives/:id/folders/:folderId', authMiddleware, requireRoles('SUPER_ADMIN', 'MEDIA_COORDINATOR', 'PRESIDENT'), async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const result = await DriveService.deleteMemberDriveFolder(req.params.id, req.params.folderId);
+    AuditService.log({
+      actorId: req.user!.id,
+      actorName: req.user!.full_name,
+      actorRole: req.user!.roles[0],
+      action: 'DELETE_MEMBER_DRIVE_FOLDER',
+      entityType: 'FOLDER',
+      entityId: req.params.folderId,
+      details: { memberDriveId: req.params.id }
+    });
+    res.json({ success: true, data: result });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: { message: err.message } });
+  }
+});
+
+// ==========================================
+// Unified Node Rename & Delete across All Views
+// ==========================================
+
+// Rename ANY folder node (master hierarchy, member drives, or custom)
+driveRouter.patch('/folders/rename-node', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  const { folderId, folderPath, newName } = req.body;
+  if (!newName || !newName.trim()) {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'INVALID_INPUT', message: 'newName is required' }
+    });
+  }
+
+  try {
+    const result = await DriveService.renameAnyFolderNode({
+      folderId,
+      folderPath,
+      newName: newName.trim()
+    });
+
+    AuditService.log({
+      actorId: req.user!.id,
+      actorName: req.user!.full_name,
+      actorRole: req.user!.roles[0],
+      action: 'RENAME_FOLDER_NODE',
+      entityType: 'FOLDER',
+      entityId: folderId || folderPath,
+      details: { newName: newName.trim(), folderPath }
+    });
+
+    res.json({ success: true, data: result });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: { message: err.message } });
+  }
+});
+
+// Delete ANY folder node
+driveRouter.delete('/folders/delete-node', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  const { folderId, folderPath } = req.body;
+  if (!folderId && !folderPath) {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'INVALID_INPUT', message: 'folderId or folderPath is required' }
+    });
+  }
+
+  try {
+    const result = await DriveService.deleteAnyFolderNode({ folderId, folderPath });
+    AuditService.log({
+      actorId: req.user!.id,
+      actorName: req.user!.full_name,
+      actorRole: req.user!.roles[0],
+      action: 'DELETE_FOLDER_NODE',
+      entityType: 'FOLDER',
+      entityId: folderId || folderPath,
+      details: { folderPath }
+    });
+
+    res.json({ success: true, data: result });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: { message: err.message } });
+  }
+});
+
+// ==========================================
+// Super Admin Data Transfer Engine
+// ==========================================
+driveRouter.post('/transfer', authMiddleware, requireRoles('SUPER_ADMIN', 'MEDIA_COORDINATOR', 'PRESIDENT'), async (req: AuthenticatedRequest, res: Response) => {
+  const { assetIds, sourceFolderId, targetFolderId, targetFolderPath, newCategory } = req.body;
+
+  if (!targetFolderId) {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'INVALID_INPUT', message: 'targetFolderId is required' }
+    });
+  }
+
+  try {
+    const result = await DriveService.transferMediaData({
+      assetIds,
+      sourceFolderId,
+      targetFolderId,
+      targetFolderPath,
+      newCategory
+    });
+
+    AuditService.log({
+      actorId: req.user!.id,
+      actorName: req.user!.full_name,
+      actorRole: req.user!.roles[0],
+      action: 'TRANSFER_MEDIA_DATA',
+      entityType: 'MEDIA',
+      entityId: targetFolderId,
+      details: {
+        transferredCount: result.transferredCount,
+        targetFolderPath,
+        newCategory
+      }
+    });
+
+    res.json({
+      success: true,
+      data: result
+    });
+  } catch (err: any) {
+    res.status(400).json({
+      success: false,
+      error: { code: 'TRANSFER_FAILED', message: err.message || 'Media transfer failed' }
+    });
+  }
+});

@@ -12,7 +12,8 @@ import {
   UserRole,
   PersonalDriveInfo,
   PersonalSubfolder,
-  FolderNode
+  FolderNode,
+  MemberDrive
 } from '../types';
 
 const BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
@@ -481,6 +482,101 @@ class ApiClient {
   async deleteMyPersonalFolder(folderId: string): Promise<{ success: boolean }> {
     return this.request<{ success: boolean }>(`/drive/my-drive/folders/${folderId}`, {
       method: 'DELETE'
+    });
+  }
+
+  // Super Admin Member Gmail-Wise Drives
+  async getMemberDrives(): Promise<MemberDrive[]> {
+    return this.request<MemberDrive[]>('/drive/member-drives');
+  }
+
+  async createMemberDrive(payload: {
+    memberEmail: string;
+    memberName: string;
+    role: UserRole | 'VLOGGER';
+    customSubfolders?: string[];
+  }): Promise<MemberDrive> {
+    return this.request<MemberDrive>('/drive/member-drives', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async getMemberDrive(id: string): Promise<MemberDrive> {
+    return this.request<MemberDrive>(`/drive/member-drives/${id}`);
+  }
+
+  async addMemberDriveSubfolder(
+    memberDriveId: string,
+    folderName: string,
+    parentFolderId?: string
+  ): Promise<PersonalSubfolder> {
+    return this.request<PersonalSubfolder>(`/drive/member-drives/${memberDriveId}/subfolders`, {
+      method: 'POST',
+      body: JSON.stringify({ folderName, parentFolderId })
+    });
+  }
+
+  async renameMemberDriveFolder(
+    memberDriveId: string,
+    folderId: string,
+    newName: string
+  ): Promise<PersonalSubfolder> {
+    return this.request<PersonalSubfolder>(`/drive/member-drives/${memberDriveId}/folders/${folderId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ newName })
+    });
+  }
+
+  async deleteMemberDriveFolder(
+    memberDriveId: string,
+    folderId: string
+  ): Promise<{ success: boolean }> {
+    return this.request<{ success: boolean }>(`/drive/member-drives/${memberDriveId}/folders/${folderId}`, {
+      method: 'DELETE'
+    });
+  }
+
+  // Unified Node Rename & Delete
+  async renameDriveNode(payload: {
+    folderId?: string;
+    folderPath?: string;
+    newName: string;
+  }): Promise<{ success: boolean; newName: string; path?: string; message: string }> {
+    return this.request<any>('/drive/folders/rename-node', {
+      method: 'PATCH',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async deleteDriveNode(payload: {
+    folderId?: string;
+    folderPath?: string;
+  }): Promise<{ success: boolean; message: string }> {
+    return this.request<any>('/drive/folders/delete-node', {
+      method: 'DELETE',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  // Super Admin Data Transfer Engine (e.g. transfer into Vlogging)
+  async transferMediaData(payload: {
+    assetIds?: string[];
+    sourceFolderId?: string;
+    targetFolderId: string;
+    targetFolderPath?: string;
+    newCategory?: string;
+  }): Promise<{
+    success: boolean;
+    transferredCount: number;
+    targetFolderId: string;
+    targetFolderPath: string;
+    message: string;
+    items: any[];
+  }> {
+    return this.request<any>('/drive/transfer', {
+      method: 'POST',
+      body: JSON.stringify(payload)
     });
   }
 

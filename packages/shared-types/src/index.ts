@@ -233,6 +233,22 @@ export interface PersonalDriveInfo {
   subfolders: PersonalSubfolder[];
 }
 
+export interface MemberDrive {
+  id: string;
+  memberEmail: string;
+  memberName: string;
+  role: UserRole | 'VLOGGER';
+  specializationLabel: string;
+  driveFolderId: string;
+  driveWebUrl: string;
+  drivePath: string;
+  sharedWithEmail: string;
+  createdAt: string;
+  updatedAt: string;
+  subfolders: PersonalSubfolder[];
+  tree?: FolderNode;
+}
+
 export interface EditingProject {
   id: string;
   assignment_id: string;

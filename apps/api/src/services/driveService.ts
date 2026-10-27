@@ -1,6 +1,6 @@
 import { config } from '../config';
 import { db } from '../db/memoryStore';
-import { MediaFolder, PersonalDriveInfo, PersonalSubfolder, UserRole } from '@mediaverse/shared-types';
+import { MediaFolder, PersonalDriveInfo, PersonalSubfolder, UserRole, MemberDrive } from '@mediaverse/shared-types';
 import { SupabaseService } from './supabaseService';
 import crypto from 'crypto';
 import fs from 'fs';
@@ -46,6 +46,7 @@ export interface UploadDestination {
 
 const TOKEN_FILE_NAME = '.drive_tokens.json';
 const STRUCTURE_FILE_NAME = '.drive_structure.json';
+const MEMBERS_FILE_NAME = '.drive_members.json';
 
 function getTokenFilePaths(): string[] {
   return [
@@ -79,13 +80,31 @@ function resolveStructureFilePath(): string {
   return path.join(process.cwd(), STRUCTURE_FILE_NAME);
 }
 
+function getMemberFilePaths(): string[] {
+  return [
+    path.join(process.cwd(), MEMBERS_FILE_NAME),
+    path.join(process.cwd(), 'apps', 'api', MEMBERS_FILE_NAME),
+    path.resolve(__dirname, '../../', MEMBERS_FILE_NAME),
+    path.resolve(__dirname, '../../../', MEMBERS_FILE_NAME)
+  ];
+}
+
+function resolveMemberFilePath(): string {
+  for (const p of getMemberFilePaths()) {
+    if (fs.existsSync(p)) return p;
+  }
+  return path.join(process.cwd(), MEMBERS_FILE_NAME);
+}
+
 export class DriveService {
   private static tokenState: DriveTokenState = {};
   private static folderIdCache = new Map<string, string>();
+  private static memberDrives: MemberDrive[] = [];
 
   static init(): void {
     this.loadTokensFromDisk();
     this.preloadFolderCache();
+    this.loadMemberDrivesFromDisk();
 
     const masterRefreshToken = config.google.refreshToken;
 
@@ -1733,31 +1752,36 @@ export class DriveService {
     }
   }
 
-  static getPersonalDriveTemplates(role: UserRole): string[] {
+  static getPersonalDriveTemplates(role: UserRole | 'VLOGGER'): string[] {
     switch (role) {
       case 'PHOTOGRAPHER':
         return [
-          '01 - Day 1 Morning (RAW & Stills)',
-          '02 - Day 1 Evening Rock Concert (RAW & Stills)',
-          '03 - Day 2 Tech Arena & Hackathon',
-          '04 - Day 2 Valedictory & Trophy Lift',
-          '05 - Highlights & Selects (High-Res JPG)'
+          '01 - Day 1 Morning Keynotes & Lamp Lighting (RAW Photos)',
+          '02 - Day 1 Stage, Dignitaries & VIP Portraits',
+          '03 - Day 1 Crowd Reactions, Stalls & Atmosphere',
+          '04 - Day 1 Evening Rock Concert (Action & Stills)',
+          '05 - Day 2 Tech Arena, Robotics & Hackathon (RAW)',
+          '06 - Day 2 Valedictory, Trophies & Prize Distribution',
+          '07 - High-Res Master Selects & Color Graded JPGs'
         ];
       case 'VIDEOGRAPHER':
+      case 'VLOGGER':
         return [
-          '01 - Day 1 Morning (4K B-Roll & Stems)',
-          '02 - Day 1 Rock Concert Multi-Cam',
-          '03 - Day 2 Robo-Wars (120fps Slow-Mo)',
-          '04 - Day 2 Star Night Concert (4K Master)',
-          '05 - Soundboard Audio Stems (WAV)'
+          '01 - Day 1 Vlogs - BTS & Campus Walk (4K)',
+          '02 - Day 1 Vlogs - Student Reactions & Live Interviews',
+          '03 - Day 1 Rock Concert Multi-Cam (4K 60fps)',
+          '04 - Day 2 Vlogs - Tech Hackathon Rush & Bot Fights',
+          '05 - Day 2 Vlogs - Fest Grand Finale & Highlights',
+          '06 - Drone Aerial B-Roll & Cinematic Establishing Shots',
+          '07 - Vlog Audio Stems & Wireless Mic Recordings (WAV)'
         ];
       case 'VIDEO_EDITOR':
         return [
-          '01 - Day 1 Instagram Reels (9-16)',
-          '02 - Day 2 Instagram Reels (9-16)',
-          '03 - Official Festival Recap (16-9)',
-          '04 - Project Assets & SFX',
-          '05 - Exports for Review'
+          '01 - Instagram Reels & Shorts (9-16 Edits)',
+          '02 - Official Fest Recap & Aftermovie (16-9 Master)',
+          '03 - Sponsor Cutdowns & Social Teasers',
+          '04 - DaVinci Resolve & Premiere Project Files',
+          '05 - Export Review Cuts & Draft Previews'
         ];
       case 'MEDIA_COORDINATOR':
       case 'SUPER_ADMIN':
@@ -2272,6 +2296,677 @@ export class DriveService {
     await SupabaseService.deleteMediaFolder(folderRecord.id).catch(() => {});
 
     return { success: true };
+  }
+
+  // ========================================================
+  // Super Admin Member Gmail-Wise Drives Management
+  // ========================================================
+
+  static loadMemberDrivesFromDisk(): void {
+    const filePath = resolveMemberFilePath();
+    try {
+      if (fs.existsSync(filePath)) {
+        const raw = fs.readFileSync(filePath, 'utf-8');
+        this.memberDrives = JSON.parse(raw);
+        console.log(`[DriveService] Loaded ${this.memberDrives.length} member drives from disk.`);
+        return;
+      }
+    } catch (err: any) {
+      console.warn(`[DriveService] Failed to load member drives from disk: ${err.message}`);
+    }
+
+    // Pre-seed default member drives for existing crew members
+    const initialSeed: MemberDrive[] = [
+      {
+        id: 'member-drive-rohan-photo',
+        memberEmail: 'photographer@dsa.cgc.edu.in',
+        memberName: 'Rohan Singh',
+        role: 'PHOTOGRAPHER',
+        specializationLabel: 'Photography Lead (RAW & Stills Only)',
+        driveFolderId: '1tFGNR9WZo_9dGgf_6zBOHdBnpPRxBQXQ',
+        driveWebUrl: 'https://drive.google.com/drive/folders/1tFGNR9WZo_9dGgf_6zBOHdBnpPRxBQXQ',
+        drivePath: '/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Rohan Singh (PHOTOGRAPHER)',
+        sharedWithEmail: 'photographer@dsa.cgc.edu.in',
+        createdAt: new Date('2026-09-01T10:00:00Z').toISOString(),
+        updatedAt: new Date().toISOString(),
+        subfolders: this.getPersonalDriveTemplates('PHOTOGRAPHER').map(name => ({
+          id: `sub-${crypto.randomUUID().slice(0, 8)}`,
+          name,
+          path: `/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Rohan Singh (PHOTOGRAPHER)/${name}`,
+          driveFolderId: `1tFGNR9WZo_${name.slice(0, 5)}`,
+          driveWebUrl: 'https://drive.google.com/drive/folders/1tFGNR9WZo_9dGgf_6zBOHdBnpPRxBQXQ',
+          isDefault: true,
+          created_at: new Date().toISOString()
+        }))
+      },
+      {
+        id: 'member-drive-vikram-video',
+        memberEmail: 'videographer@dsa.cgc.edu.in',
+        memberName: 'Vikram Malhotra',
+        role: 'VIDEOGRAPHER',
+        specializationLabel: 'Videography & Vlogging (4K Footage & BTS)',
+        driveFolderId: '1m7U0n1wuICACLVBmKl8YYLqEXvmVALWQ',
+        driveWebUrl: 'https://drive.google.com/drive/folders/1m7U0n1wuICACLVBmKl8YYLqEXvmVALWQ',
+        drivePath: '/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Vikram Malhotra (VIDEOGRAPHER)',
+        sharedWithEmail: 'videographer@dsa.cgc.edu.in',
+        createdAt: new Date('2026-09-01T10:00:00Z').toISOString(),
+        updatedAt: new Date().toISOString(),
+        subfolders: this.getPersonalDriveTemplates('VIDEOGRAPHER').map(name => ({
+          id: `sub-${crypto.randomUUID().slice(0, 8)}`,
+          name,
+          path: `/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Vikram Malhotra (VIDEOGRAPHER)/${name}`,
+          driveFolderId: `1m7U0n1wu_${name.slice(0, 5)}`,
+          driveWebUrl: 'https://drive.google.com/drive/folders/1m7U0n1wuICACLVBmKl8YYLqEXvmVALWQ',
+          isDefault: true,
+          created_at: new Date().toISOString()
+        }))
+      },
+      {
+        id: 'member-drive-simran-editor',
+        memberEmail: 'editor@dsa.cgc.edu.in',
+        memberName: 'Simran Kaur',
+        role: 'VIDEO_EDITOR',
+        specializationLabel: 'Reels, Recaps & Broadcast Delivery',
+        driveFolderId: '1Mgc1jPrW1OnjXCWh24ExtC7Selj5v0kb',
+        driveWebUrl: 'https://drive.google.com/drive/folders/1Mgc1jPrW1OnjXCWh24ExtC7Selj5v0kb',
+        drivePath: '/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Simran Kaur (VIDEO_EDITOR)',
+        sharedWithEmail: 'editor@dsa.cgc.edu.in',
+        createdAt: new Date('2026-09-01T10:00:00Z').toISOString(),
+        updatedAt: new Date().toISOString(),
+        subfolders: this.getPersonalDriveTemplates('VIDEO_EDITOR').map(name => ({
+          id: `sub-${crypto.randomUUID().slice(0, 8)}`,
+          name,
+          path: `/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Simran Kaur (VIDEO_EDITOR)/${name}`,
+          driveFolderId: `1Mgc1jPr_${name.slice(0, 5)}`,
+          driveWebUrl: 'https://drive.google.com/drive/folders/1Mgc1jPrW1OnjXCWh24ExtC7Selj5v0kb',
+          isDefault: true,
+          created_at: new Date().toISOString()
+        }))
+      }
+    ];
+
+    this.memberDrives = initialSeed;
+    this.saveMemberDrivesToDisk();
+  }
+
+  static saveMemberDrivesToDisk(): void {
+    const filePath = resolveMemberFilePath();
+    try {
+      const dir = path.dirname(filePath);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(filePath, JSON.stringify(this.memberDrives, null, 2), 'utf-8');
+      console.log(`[DriveService] Persisted ${this.memberDrives.length} member drives to ${filePath}`);
+    } catch (err: any) {
+      console.warn(`[DriveService] Failed to save member drives to disk: ${err.message}`);
+    }
+  }
+
+  static getAllMemberDrives(): MemberDrive[] {
+    return this.memberDrives;
+  }
+
+  static getMemberDriveById(id: string): MemberDrive | undefined {
+    return this.memberDrives.find(m => m.id === id || m.memberEmail.toLowerCase() === id.toLowerCase());
+  }
+
+  static async createMemberDriveForGmail(options: {
+    adminUser: { id: string; full_name: string };
+    memberEmail: string;
+    memberName: string;
+    role: UserRole | 'VLOGGER';
+    customSubfolders?: string[];
+  }): Promise<MemberDrive> {
+    const cleanEmail = (options.memberEmail || '').trim().toLowerCase();
+    const cleanName = (options.memberName || '').trim();
+
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      throw new Error('Valid member Gmail address is required (e.g., photographer@gmail.com).');
+    }
+    if (!cleanName) {
+      throw new Error('Member name is required.');
+    }
+
+    const role = options.role || 'PHOTOGRAPHER';
+    const rootId = config.google.rootFolderId || '1PNvblS0BffXR12av3dC7fP7wNdf948kO';
+    const parentContainerName = 'Crew Personal Drives';
+
+    // 1. Ensure "Crew Personal Drives" parent container folder exists in Google Drive
+    let crewDrivesParentId = this.folderIdCache.get(parentContainerName) || '';
+    if (!crewDrivesParentId) {
+      try {
+        crewDrivesParentId = await this.getOrCreateDriveFolder(parentContainerName, rootId);
+        this.folderIdCache.set(parentContainerName, crewDrivesParentId);
+      } catch {
+        crewDrivesParentId = rootId;
+      }
+    }
+
+    // 2. Folder title: e.g. "Arjun Sharma (PHOTOGRAPHY)" or "Rohan Vlogs (VIDEOGRAPHY)"
+    const specializationLabel = role === 'PHOTOGRAPHER'
+      ? 'Photography (RAW Photos & Stills Only)'
+      : role === 'VIDEOGRAPHER' || role === 'VLOGGER'
+      ? 'Videography & Vlogging (4K Footage & BTS)'
+      : role === 'VIDEO_EDITOR'
+      ? 'Video Editing & Deliverables'
+      : `${role} Drive`;
+
+    const userFolderName = `${cleanName} (${role.toUpperCase()})`;
+
+    let userDriveFolderId = '';
+    try {
+      userDriveFolderId = await this.getOrCreateDriveFolder(userFolderName, crewDrivesParentId);
+    } catch {
+      userDriveFolderId = `member-drive-${crypto.randomUUID().slice(0, 8)}`;
+    }
+
+    const drivePath = `/DSA MEDIAVERSE SAVISKAR 26/${parentContainerName}/${userFolderName}`;
+    const driveWebUrl = `https://drive.google.com/drive/folders/${userDriveFolderId}`;
+
+    // 3. Share with Gmail as Editor (writer)
+    let sharedWithEmail = cleanEmail;
+    if (!userDriveFolderId.startsWith('member-drive-')) {
+      try {
+        await this.shareFolderWithUser(userDriveFolderId, cleanEmail);
+      } catch (err: any) {
+        console.warn(`[DriveService] Sharing invitation warning: ${err.message}`);
+      }
+    }
+
+    // 4. Create role-specific subfolders (PHOTOGRAPHY ONLY has photography folders!)
+    const templateNames = (options.customSubfolders && options.customSubfolders.length > 0)
+      ? options.customSubfolders
+      : this.getPersonalDriveTemplates(role);
+
+    const subfolders: PersonalSubfolder[] = [];
+
+    for (const subName of templateNames) {
+      let subDriveId = '';
+      if (!userDriveFolderId.startsWith('member-drive-')) {
+        try {
+          subDriveId = await this.getOrCreateDriveFolder(subName, userDriveFolderId);
+        } catch {
+          subDriveId = `sub-${crypto.randomUUID().slice(0, 8)}`;
+        }
+      } else {
+        subDriveId = `sub-${crypto.randomUUID().slice(0, 8)}`;
+      }
+
+      const subPath = `${drivePath}/${subName}`;
+      const subRecord: MediaFolder = {
+        id: crypto.randomUUID(),
+        event_id: 'saviskar-2026',
+        folder_name: subName,
+        folder_path: subPath,
+        parent_folder_id: userDriveFolderId,
+        drive_folder_id: subDriveId,
+        drive_web_url: `https://drive.google.com/drive/folders/${subDriveId}`,
+        is_system_created: true,
+        user_name: cleanName,
+        role: role as UserRole,
+        is_personal: true,
+        created_at: new Date().toISOString()
+      };
+
+      db.mediaFolders.push(subRecord);
+      this.folderIdCache.set(subPath, subDriveId);
+      this.folderIdCache.set(subName, subDriveId);
+      await SupabaseService.persistMediaFolder(subRecord).catch(() => {});
+
+      subfolders.push({
+        id: subRecord.id,
+        name: subName,
+        path: subPath,
+        driveFolderId: subDriveId,
+        driveWebUrl: `https://drive.google.com/drive/folders/${subDriveId}`,
+        isDefault: true,
+        created_at: subRecord.created_at
+      });
+    }
+
+    const driveTree: FolderNode = {
+      id: userDriveFolderId,
+      name: userFolderName,
+      path: drivePath,
+      driveFolderId: userDriveFolderId,
+      driveWebUrl,
+      children: subfolders.map(s => ({
+        id: s.id,
+        name: s.name,
+        path: s.path,
+        driveFolderId: s.driveFolderId,
+        driveWebUrl: s.driveWebUrl,
+        children: []
+      }))
+    };
+
+    // Remove old record for this email if re-creating
+    this.memberDrives = this.memberDrives.filter(m => m.memberEmail.toLowerCase() !== cleanEmail);
+
+    const newDrive: MemberDrive = {
+      id: `member-${crypto.randomUUID()}`,
+      memberEmail: cleanEmail,
+      memberName: cleanName,
+      role,
+      specializationLabel,
+      driveFolderId: userDriveFolderId,
+      driveWebUrl,
+      drivePath,
+      sharedWithEmail,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      subfolders,
+      tree: driveTree
+    };
+
+    this.memberDrives.push(newDrive);
+    this.saveMemberDrivesToDisk();
+
+    console.log(`[DriveService] Created Super Admin member drive for ${cleanEmail} (${cleanName}, ${role}) with ${subfolders.length} subfolders.`);
+
+    return newDrive;
+  }
+
+  static async addMemberDriveSubfolder(
+    memberDriveId: string,
+    folderName: string,
+    parentFolderId?: string
+  ): Promise<PersonalSubfolder> {
+    const cleanName = folderName.trim();
+    if (!cleanName) throw new Error('Subfolder name cannot be empty.');
+
+    const memberDrive = this.getMemberDriveById(memberDriveId);
+    if (!memberDrive) throw new Error('Member drive not found.');
+
+    const parentId = parentFolderId || memberDrive.driveFolderId;
+
+    let subDriveId = '';
+    if (!parentId.startsWith('member-drive-') && !parentId.startsWith('sub-')) {
+      try {
+        subDriveId = await this.getOrCreateDriveFolder(cleanName, parentId);
+      } catch {
+        subDriveId = `sub-${crypto.randomUUID().slice(0, 8)}`;
+      }
+    } else {
+      subDriveId = `sub-${crypto.randomUUID().slice(0, 8)}`;
+    }
+
+    const subPath = `${memberDrive.drivePath}/${cleanName}`;
+    const newSubfolder: PersonalSubfolder = {
+      id: crypto.randomUUID(),
+      name: cleanName,
+      path: subPath,
+      driveFolderId: subDriveId,
+      driveWebUrl: `https://drive.google.com/drive/folders/${subDriveId}`,
+      isDefault: false,
+      created_at: new Date().toISOString()
+    };
+
+    memberDrive.subfolders.push(newSubfolder);
+    memberDrive.updatedAt = new Date().toISOString();
+
+    if (memberDrive.tree) {
+      if (!memberDrive.tree.children) memberDrive.tree.children = [];
+      memberDrive.tree.children.push({
+        id: newSubfolder.id,
+        name: newSubfolder.name,
+        path: newSubfolder.path,
+        driveFolderId: newSubfolder.driveFolderId,
+        driveWebUrl: newSubfolder.driveWebUrl,
+        children: []
+      });
+    }
+
+    // Register in db.mediaFolders
+    const mediaFolderRecord: MediaFolder = {
+      id: newSubfolder.id,
+      event_id: 'saviskar-2026',
+      folder_name: cleanName,
+      folder_path: subPath,
+      parent_folder_id: parentId,
+      drive_folder_id: subDriveId,
+      drive_web_url: newSubfolder.driveWebUrl,
+      is_system_created: false,
+      user_name: memberDrive.memberName,
+      role: memberDrive.role as UserRole,
+      is_personal: true,
+      created_at: newSubfolder.created_at
+    };
+    db.mediaFolders.push(mediaFolderRecord);
+
+    this.saveMemberDrivesToDisk();
+    return newSubfolder;
+  }
+
+  static async renameMemberDriveFolder(
+    memberDriveId: string,
+    folderId: string,
+    newName: string
+  ): Promise<PersonalSubfolder> {
+    const cleanName = newName.trim();
+    if (!cleanName) throw new Error('New folder name cannot be empty.');
+
+    const memberDrive = this.getMemberDriveById(memberDriveId);
+    if (!memberDrive) throw new Error('Member drive not found.');
+
+    const sub = memberDrive.subfolders.find(s => s.id === folderId || s.driveFolderId === folderId);
+    if (!sub) throw new Error('Subfolder not found in member drive.');
+
+    // Patch name in Google Drive
+    const token = await this.getValidAccessToken();
+    if (token && !sub.driveFolderId.startsWith('sub-') && !sub.driveFolderId.startsWith('member-drive-')) {
+      try {
+        await fetch(`https://www.googleapis.com/drive/v3/files/${sub.driveFolderId}?supportsAllDrives=true`, {
+          method: 'PATCH',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ name: cleanName })
+        });
+      } catch (err: any) {
+        console.warn(`[DriveService] Drive patch warning: ${err.message}`);
+      }
+    }
+
+    sub.name = cleanName;
+    const parts = sub.path.split('/');
+    parts[parts.length - 1] = cleanName;
+    sub.path = parts.join('/');
+    memberDrive.updatedAt = new Date().toISOString();
+
+    if (memberDrive.tree && memberDrive.tree.children) {
+      const treeNode = memberDrive.tree.children.find(c => c.driveFolderId === sub.driveFolderId || c.id === sub.id);
+      if (treeNode) {
+        treeNode.name = cleanName;
+        treeNode.path = sub.path;
+      }
+    }
+
+    // Update in db.mediaFolders
+    const dbRec = db.mediaFolders.find(f => f.drive_folder_id === sub.driveFolderId);
+    if (dbRec) {
+      dbRec.folder_name = cleanName;
+      dbRec.folder_path = sub.path;
+    }
+
+    this.saveMemberDrivesToDisk();
+    return sub;
+  }
+
+  static async deleteMemberDriveFolder(
+    memberDriveId: string,
+    folderId: string
+  ): Promise<{ success: boolean }> {
+    const memberDrive = this.getMemberDriveById(memberDriveId);
+    if (!memberDrive) throw new Error('Member drive not found.');
+
+    const subIdx = memberDrive.subfolders.findIndex(s => s.id === folderId || s.driveFolderId === folderId);
+    if (subIdx === -1) throw new Error('Subfolder not found in member drive.');
+
+    const sub = memberDrive.subfolders[subIdx];
+
+    // Trash in Google Drive
+    const token = await this.getValidAccessToken();
+    if (token && !sub.driveFolderId.startsWith('sub-') && !sub.driveFolderId.startsWith('member-drive-')) {
+      try {
+        await fetch(`https://www.googleapis.com/drive/v3/files/${sub.driveFolderId}?supportsAllDrives=true`, {
+          method: 'PATCH',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ trashed: true })
+        });
+      } catch (err: any) {
+        console.warn(`[DriveService] Drive trash warning: ${err.message}`);
+      }
+    }
+
+    memberDrive.subfolders.splice(subIdx, 1);
+    memberDrive.updatedAt = new Date().toISOString();
+
+    if (memberDrive.tree && memberDrive.tree.children) {
+      memberDrive.tree.children = memberDrive.tree.children.filter(c => c.driveFolderId !== sub.driveFolderId && c.id !== sub.id);
+    }
+
+    // Remove from db.mediaFolders
+    db.mediaFolders = db.mediaFolders.filter(f => f.drive_folder_id !== sub.driveFolderId);
+
+    this.saveMemberDrivesToDisk();
+    return { success: true };
+  }
+
+  // Unified folder node rename across Master hierarchy and Personal/Member drives
+  static async renameAnyFolderNode(params: {
+    folderId?: string;
+    folderPath?: string;
+    newName: string;
+  }): Promise<{ success: boolean; newName: string; path?: string; message: string }> {
+    const cleanName = params.newName.trim();
+    if (!cleanName) throw new Error('New folder name cannot be empty.');
+
+    // 1. Try renaming in Master Hierarchy if folderPath is in root structure
+    if (params.folderPath) {
+      const root = this.getFolderStructure();
+      const parentInfo = this.findParentOfPath(root, params.folderPath);
+      if (parentInfo) {
+        await this.renameFolder(params.folderPath, cleanName);
+        return {
+          success: true,
+          newName: cleanName,
+          path: params.folderPath,
+          message: `Folder renamed to "${cleanName}" in master hierarchy.`
+        };
+      }
+    }
+
+    // 2. Try renaming in Member Drives
+    for (const memberDrive of this.memberDrives) {
+      const sub = memberDrive.subfolders.find(
+        s => (params.folderId && s.driveFolderId === params.folderId) || (params.folderPath && s.path === params.folderPath)
+      );
+      if (sub) {
+        await this.renameMemberDriveFolder(memberDrive.id, sub.id, cleanName);
+        return {
+          success: true,
+          newName: cleanName,
+          path: sub.path,
+          message: `Folder renamed to "${cleanName}" in ${memberDrive.memberName}'s drive.`
+        };
+      }
+      if (params.folderId && memberDrive.driveFolderId === params.folderId) {
+        memberDrive.memberName = cleanName;
+        this.saveMemberDrivesToDisk();
+        return {
+          success: true,
+          newName: cleanName,
+          message: `Drive root updated to "${cleanName}".`
+        };
+      }
+    }
+
+    // 3. Fallback: update in db.mediaFolders and Google Drive directly
+    const folderRec = db.mediaFolders.find(
+      f => (params.folderId && f.drive_folder_id === params.folderId) || (params.folderPath && f.folder_path === params.folderPath)
+    );
+    if (folderRec) {
+      const token = await this.getValidAccessToken();
+      if (token && !folderRec.drive_folder_id.startsWith('user-drive-') && !folderRec.drive_folder_id.startsWith('sub-')) {
+        try {
+          await fetch(`https://www.googleapis.com/drive/v3/files/${folderRec.drive_folder_id}?supportsAllDrives=true`, {
+            method: 'PATCH',
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ name: cleanName })
+          });
+        } catch (err: any) {
+          console.warn(`[DriveService] Drive patch warning: ${err.message}`);
+        }
+      }
+      folderRec.folder_name = cleanName;
+      return {
+        success: true,
+        newName: cleanName,
+        path: folderRec.folder_path,
+        message: `Folder renamed to "${cleanName}".`
+      };
+    }
+
+    throw new Error(`Folder not found in hierarchy or member drives.`);
+  }
+
+  // Unified folder node delete across Master hierarchy and Member drives
+  static async deleteAnyFolderNode(params: {
+    folderId?: string;
+    folderPath?: string;
+  }): Promise<{ success: boolean; message: string }> {
+    // 1. Master hierarchy delete
+    if (params.folderPath) {
+      const root = this.getFolderStructure();
+      const parentInfo = this.findParentOfPath(root, params.folderPath);
+      if (parentInfo) {
+        await this.deleteFolder(params.folderPath);
+        return { success: true, message: `Folder removed from master structure.` };
+      }
+    }
+
+    // 2. Member drive subfolder delete
+    for (const memberDrive of this.memberDrives) {
+      const sub = memberDrive.subfolders.find(
+        s => (params.folderId && s.driveFolderId === params.folderId) || (params.folderPath && s.path === params.folderPath)
+      );
+      if (sub) {
+        await this.deleteMemberDriveFolder(memberDrive.id, sub.id);
+        return { success: true, message: `Subfolder deleted from ${memberDrive.memberName}'s drive.` };
+      }
+    }
+
+    // 3. MediaFolders record delete
+    const folderIdx = db.mediaFolders.findIndex(
+      f => (params.folderId && f.drive_folder_id === params.folderId) || (params.folderPath && f.folder_path === params.folderPath)
+    );
+    if (folderIdx !== -1) {
+      const folderRec = db.mediaFolders[folderIdx];
+      const token = await this.getValidAccessToken();
+      if (token && !folderRec.drive_folder_id.startsWith('user-drive-') && !folderRec.drive_folder_id.startsWith('sub-')) {
+        try {
+          await fetch(`https://www.googleapis.com/drive/v3/files/${folderRec.drive_folder_id}?supportsAllDrives=true`, {
+            method: 'PATCH',
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ trashed: true })
+          });
+        } catch {}
+      }
+      db.mediaFolders.splice(folderIdx, 1);
+      return { success: true, message: `Folder deleted successfully.` };
+    }
+
+    throw new Error('Folder not found.');
+  }
+
+  // ========================================================
+  // Super Admin Data Transfer Engine (e.g. transfer into Vlogging)
+  // ========================================================
+  static async transferMediaData(params: {
+    assetIds?: string[];
+    sourceFolderId?: string;
+    targetFolderId: string;
+    targetFolderPath?: string;
+    newCategory?: string;
+  }): Promise<{
+    success: boolean;
+    transferredCount: number;
+    targetFolderId: string;
+    targetFolderPath: string;
+    message: string;
+    items: any[];
+  }> {
+    const { targetFolderId, targetFolderPath = 'Google Drive Target Folder', newCategory } = params;
+
+    if (!targetFolderId) {
+      throw new Error('targetFolderId is required to transfer media data.');
+    }
+
+    // Determine target assets
+    let targetAssets = db.mediaAssets;
+    if (params.assetIds && params.assetIds.length > 0) {
+      targetAssets = targetAssets.filter(a => params.assetIds!.includes(a.id));
+    } else if (params.sourceFolderId) {
+      targetAssets = targetAssets.filter(
+        a => a.drive_file_id === params.sourceFolderId ||
+             (a.tags && a.tags.includes(params.sourceFolderId!))
+      );
+    }
+
+    if (targetAssets.length === 0) {
+      throw new Error('No media assets found matching the transfer selection.');
+    }
+
+    const token = await this.getValidAccessToken();
+    const transferredItems: any[] = [];
+
+    for (const asset of targetAssets) {
+      // 1. Move Google Drive file if drive_file_id exists and token available
+      if (token && asset.drive_file_id && !asset.drive_file_id.startsWith('mock-') && !targetFolderId.startsWith('sub-')) {
+        try {
+          // Fetch existing parents
+          const metaRes = await fetch(
+            `https://www.googleapis.com/drive/v3/files/${asset.drive_file_id}?fields=parents&supportsAllDrives=true`,
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+          if (metaRes.ok) {
+            const meta = (await metaRes.json()) as any;
+            const currentParents = (meta.parents || []).join(',');
+
+            // Move file to targetFolderId
+            await fetch(
+              `https://www.googleapis.com/drive/v3/files/${asset.drive_file_id}?addParents=${targetFolderId}&removeParents=${currentParents}&supportsAllDrives=true`,
+              {
+                method: 'PATCH',
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                  'Content-Type': 'application/json'
+                }
+              }
+            );
+            console.log(`[DriveService] Transferred Drive file ${asset.drive_file_id} into folder ${targetFolderId}`);
+          }
+        } catch (err: any) {
+          console.warn(`[DriveService] Cloud file transfer notice: ${err.message}`);
+        }
+      }
+
+      // 2. Update local asset record
+      if (newCategory) {
+        asset.media_type = newCategory as any;
+      }
+      if (!asset.tags) asset.tags = [];
+      asset.tags.push(`transferred-to-${newCategory || 'target'}`);
+      asset.description = `${asset.description || ''} [Transferred to ${targetFolderPath}]`.trim();
+
+      await SupabaseService.persistMediaAsset(asset).catch(() => {});
+      transferredItems.push({
+        id: asset.id,
+        filename: asset.filename,
+        media_type: asset.media_type
+      });
+    }
+
+    console.log(`[DriveService] Transferred ${transferredItems.length} media items into ${targetFolderPath} (${targetFolderId})`);
+
+    return {
+      success: true,
+      transferredCount: transferredItems.length,
+      targetFolderId,
+      targetFolderPath,
+      message: `Successfully transferred ${transferredItems.length} media assets into ${targetFolderPath}`,
+      items: transferredItems
+    };
   }
 }
 

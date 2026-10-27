@@ -19,7 +19,9 @@ import {
   Search,
   RefreshCw,
   Mail,
-  X
+  X,
+  Edit3,
+  Trash2
 } from 'lucide-react';
 
 interface InteractiveFolderTreeProps {
@@ -58,6 +60,11 @@ export const InteractiveFolderTree: React.FC<InteractiveFolderTreeProps> = ({
   const [addingSubfolderParentId, setAddingSubfolderParentId] = useState<string | null>(null);
   const [newSubfolderName, setNewSubfolderName] = useState<string>('');
   const [isSubmittingSubfolder, setIsSubmittingSubfolder] = useState<boolean>(false);
+
+  // Inline rename folder state
+  const [renamingNodeKey, setRenamingNodeKey] = useState<string | null>(null);
+  const [renameInputValue, setRenameInputValue] = useState<string>('');
+  const [isSubmittingRename, setIsSubmittingRename] = useState<boolean>(false);
 
   // Setup Wizard Modal state
   const [showSetupModal, setShowSetupModal] = useState<boolean>(false);
@@ -181,6 +188,48 @@ export const InteractiveFolderTree: React.FC<InteractiveFolderTreeProps> = ({
     }
   };
 
+  // Inline Rename Folder Handler
+  const handleExecuteRename = async (node: FolderNode) => {
+    const cleanName = renameInputValue.trim();
+    if (!cleanName || cleanName === node.name) {
+      setRenamingNodeKey(null);
+      return;
+    }
+    try {
+      setIsSubmittingRename(true);
+      await api.renameDriveNode({
+        folderId: node.driveFolderId,
+        folderPath: node.path,
+        newName: cleanName
+      });
+      notify(`Folder renamed to "${cleanName}"!`);
+      setRenamingNodeKey(null);
+      await loadTreeData();
+    } catch (err: any) {
+      alert(`Could not rename folder: ${err.message || err}`);
+    } finally {
+      setIsSubmittingRename(false);
+    }
+  };
+
+  // Inline Delete Folder Handler
+  const handleDeleteFolderNode = async (node: FolderNode, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!window.confirm(`Are you sure you want to remove folder "${node.name}" from Google Drive?`)) {
+      return;
+    }
+    try {
+      await api.deleteDriveNode({
+        folderId: node.driveFolderId,
+        folderPath: node.path
+      });
+      notify(`Folder "${node.name}" removed from hierarchy.`);
+      await loadTreeData();
+    } catch (err: any) {
+      alert(`Could not delete folder: ${err.message || err}`);
+    }
+  };
+
   // Personal Drive Setup Wizard Submission
   const handleRunSetupWizard = async () => {
     const emailToShare = wizardEmail.trim().toLowerCase();
@@ -257,6 +306,7 @@ export const InteractiveFolderTree: React.FC<InteractiveFolderTreeProps> = ({
     const isExpanded = expandedNodes.has(node.path) || Boolean(searchQuery.trim());
     const isSelected = selectedFolderId === node.driveFolderId;
     const isAddingSubfolder = addingSubfolderParentId === (node.driveFolderId || node.path);
+    const isRenaming = renamingNodeKey === (node.driveFolderId || node.path);
     const driveUrl = node.driveWebUrl || (node.driveFolderId ? `https://drive.google.com/drive/folders/${node.driveFolderId}` : undefined);
 
     return (
@@ -270,12 +320,12 @@ export const InteractiveFolderTree: React.FC<InteractiveFolderTreeProps> = ({
           }`}
           style={{ paddingLeft: `${Math.max(12, depth * 24 + 12)}px` }}
           onClick={() => {
-            if (node.driveFolderId) {
+            if (node.driveFolderId && !isRenaming) {
               onSelectFolder(node.driveFolderId, node.path, isPersonal ? 'PERSONAL' : 'OFFICIAL');
             }
           }}
         >
-          {/* Left: Chevron + Icon + Folder Name */}
+          {/* Left: Chevron + Icon + Folder Name / Inline Rename Input */}
           <div className="flex items-center gap-3 min-w-0 flex-1">
             {hasChildren ? (
               <button
@@ -291,13 +341,42 @@ export const InteractiveFolderTree: React.FC<InteractiveFolderTreeProps> = ({
 
             {getFolderIcon(node.name, node.path, isPersonal)}
 
-            <span className={`text-sm truncate ${isSelected ? 'font-bold text-red-950' : 'font-medium text-slate-800'}`}>
-              {node.name}
-            </span>
+            {isRenaming ? (
+              <div className="flex items-center gap-1.5 flex-1 min-w-0" onClick={e => e.stopPropagation()}>
+                <input
+                  type="text"
+                  autoFocus
+                  value={renameInputValue}
+                  onChange={e => setRenameInputValue(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') handleExecuteRename(node);
+                    if (e.key === 'Escape') setRenamingNodeKey(null);
+                  }}
+                  className="text-xs px-2.5 py-1 rounded-lg bg-white border-2 border-red-500 focus:outline-hidden text-slate-900 font-bold w-full max-w-xs shadow-2xs"
+                />
+                <button
+                  onClick={() => handleExecuteRename(node)}
+                  disabled={isSubmittingRename || !renameInputValue.trim()}
+                  className="px-2.5 py-1 rounded-lg text-xs font-bold bg-red-600 hover:bg-red-700 text-white shrink-0 disabled:opacity-50"
+                >
+                  {isSubmittingRename ? 'Saving...' : 'Save'}
+                </button>
+                <button
+                  onClick={() => setRenamingNodeKey(null)}
+                  className="p-1 text-slate-400 hover:text-slate-600 rounded shrink-0"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ) : (
+              <span className={`text-sm truncate ${isSelected ? 'font-bold text-red-950' : 'font-medium text-slate-800'}`}>
+                {node.name}
+              </span>
+            )}
           </div>
 
           {/* Right: Actions with proper spacing */}
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-1.5 shrink-0">
             {/* Active Target Indicator / Button */}
             {isSelected ? (
               <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold bg-red-600 text-white shadow-2xs">
@@ -318,6 +397,19 @@ export const InteractiveFolderTree: React.FC<InteractiveFolderTreeProps> = ({
               </button>
             )}
 
+            {/* Rename Folder Button */}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setRenamingNodeKey(node.driveFolderId || node.path);
+                setRenameInputValue(node.name);
+              }}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 border border-transparent transition-colors"
+              title="Rename folder"
+            >
+              <Edit3 className="w-3.5 h-3.5" />
+            </button>
+
             {/* Subfolder Button */}
             <button
               onClick={(e) => {
@@ -330,6 +422,17 @@ export const InteractiveFolderTree: React.FC<InteractiveFolderTreeProps> = ({
             >
               <FolderPlus className="w-4 h-4" />
             </button>
+
+            {/* Delete Folder Button (for non-root nodes) */}
+            {depth > 0 && (
+              <button
+                onClick={(e) => handleDeleteFolderNode(node, e)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-transparent transition-colors"
+                title="Delete folder from Google Drive"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            )}
 
             {/* Open in Drive Link */}
             {driveUrl && (

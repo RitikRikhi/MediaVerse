@@ -1,0 +1,218 @@
+[
+  {
+    "id": "member-drive-rohan-photo",
+    "memberEmail": "photographer@dsa.cgc.edu.in",
+    "memberName": "Rohan Singh",
+    "role": "PHOTOGRAPHER",
+    "specializationLabel": "Photography Lead (RAW & Stills Only)",
+    "driveFolderId": "1tFGNR9WZo_9dGgf_6zBOHdBnpPRxBQXQ",
+    "driveWebUrl": "https://drive.google.com/drive/folders/1tFGNR9WZo_9dGgf_6zBOHdBnpPRxBQXQ",
+    "drivePath": "/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Rohan Singh (PHOTOGRAPHER)",
+    "sharedWithEmail": "photographer@dsa.cgc.edu.in",
+    "createdAt": "2026-09-01T10:00:00.000Z",
+    "updatedAt": "2026-10-27T05:57:43.652Z",
+    "subfolders": [
+      {
+        "id": "sub-92142a70",
+        "name": "01 - Day 1 Morning Keynotes & Lamp Lighting (RAW Photos)",
+        "path": "/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Rohan Singh (PHOTOGRAPHER)/01 - Day 1 Morning Keynotes & Lamp Lighting (RAW Photos)",
+        "driveFolderId": "1tFGNR9WZo_01 - ",
+        "driveWebUrl": "https://drive.google.com/drive/folders/1tFGNR9WZo_9dGgf_6zBOHdBnpPRxBQXQ",
+        "isDefault": true,
+        "created_at": "2026-10-27T05:57:43.652Z"
+      },
+      {
+        "id": "sub-70ce0db4",
+        "name": "02 - Day 1 Stage, Dignitaries & VIP Portraits",
+        "path": "/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Rohan Singh (PHOTOGRAPHER)/02 - Day 1 Stage, Dignitaries & VIP Portraits",
+        "driveFolderId": "1tFGNR9WZo_02 - ",
+        "driveWebUrl": "https://drive.google.com/drive/folders/1tFGNR9WZo_9dGgf_6zBOHdBnpPRxBQXQ",
+        "isDefault": true,
+        "created_at": "2026-10-27T05:57:43.652Z"
+      },
+      {
+        "id": "sub-ca81dee5",
+        "name": "03 - Day 1 Crowd Reactions, Stalls & Atmosphere",
+        "path": "/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Rohan Singh (PHOTOGRAPHER)/03 - Day 1 Crowd Reactions, Stalls & Atmosphere",
+        "driveFolderId": "1tFGNR9WZo_03 - ",
+        "driveWebUrl": "https://drive.google.com/drive/folders/1tFGNR9WZo_9dGgf_6zBOHdBnpPRxBQXQ",
+        "isDefault": true,
+        "created_at": "2026-10-27T05:57:43.652Z"
+      },
+      {
+        "id": "sub-26128c87",
+        "name": "04 - Day 1 Evening Rock Concert (Action & Stills)",
+        "path": "/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Rohan Singh (PHOTOGRAPHER)/04 - Day 1 Evening Rock Concert (Action & Stills)",
+        "driveFolderId": "1tFGNR9WZo_04 - ",
+        "driveWebUrl": "https://drive.google.com/drive/folders/1tFGNR9WZo_9dGgf_6zBOHdBnpPRxBQXQ",
+        "isDefault": true,
+        "created_at": "2026-10-27T05:57:43.652Z"
+      },
+      {
+        "id": "sub-a1ba676e",
+        "name": "05 - Day 2 Tech Arena, Robotics & Hackathon (RAW)",
+        "path": "/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Rohan Singh (PHOTOGRAPHER)/05 - Day 2 Tech Arena, Robotics & Hackathon (RAW)",
+        "driveFolderId": "1tFGNR9WZo_05 - ",
+        "driveWebUrl": "https://drive.google.com/drive/folders/1tFGNR9WZo_9dGgf_6zBOHdBnpPRxBQXQ",
+        "isDefault": true,
+        "created_at": "2026-10-27T05:57:43.652Z"
+      },
+      {
+        "id": "sub-5ba9a088",
+        "name": "06 - Day 2 Valedictory, Trophies & Prize Distribution",
+        "path": "/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Rohan Singh (PHOTOGRAPHER)/06 - Day 2 Valedictory, Trophies & Prize Distribution",
+        "driveFolderId": "1tFGNR9WZo_06 - ",
+        "driveWebUrl": "https://drive.google.com/drive/folders/1tFGNR9WZo_9dGgf_6zBOHdBnpPRxBQXQ",
+        "isDefault": true,
+        "created_at": "2026-10-27T05:57:43.652Z"
+      },
+      {
+        "id": "sub-0d228137",
+        "name": "07 - High-Res Master Selects & Color Graded JPGs",
+        "path": "/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Rohan Singh (PHOTOGRAPHER)/07 - High-Res Master Selects & Color Graded JPGs",
+        "driveFolderId": "1tFGNR9WZo_07 - ",
+        "driveWebUrl": "https://drive.google.com/drive/folders/1tFGNR9WZo_9dGgf_6zBOHdBnpPRxBQXQ",
+        "isDefault": true,
+        "created_at": "2026-10-27T05:57:43.652Z"
+      }
+    ]
+  },
+  {
+    "id": "member-drive-vikram-video",
+    "memberEmail": "videographer@dsa.cgc.edu.in",
+    "memberName": "Vikram Malhotra",
+    "role": "VIDEOGRAPHER",
+    "specializationLabel": "Videography & Vlogging (4K Footage & BTS)",
+    "driveFolderId": "1m7U0n1wuICACLVBmKl8YYLqEXvmVALWQ",
+    "driveWebUrl": "https://drive.google.com/drive/folders/1m7U0n1wuICACLVBmKl8YYLqEXvmVALWQ",
+    "drivePath": "/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Vikram Malhotra (VIDEOGRAPHER)",
+    "sharedWithEmail": "videographer@dsa.cgc.edu.in",
+    "createdAt": "2026-09-01T10:00:00.000Z",
+    "updatedAt": "2026-10-27T05:57:43.652Z",
+    "subfolders": [
+      {
+        "id": "sub-c3124f81",
+        "name": "01 - Day 1 Vlogs - BTS & Campus Walk (4K)",
+        "path": "/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Vikram Malhotra (VIDEOGRAPHER)/01 - Day 1 Vlogs - BTS & Campus Walk (4K)",
+        "driveFolderId": "1m7U0n1wu_01 - ",
+        "driveWebUrl": "https://drive.google.com/drive/folders/1m7U0n1wuICACLVBmKl8YYLqEXvmVALWQ",
+        "isDefault": true,
+        "created_at": "2026-10-27T05:57:43.652Z"
+      },
+      {
+        "id": "sub-288b1bcc",
+        "name": "02 - Day 1 Vlogs - Student Reactions & Live Interviews",
+        "path": "/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Vikram Malhotra (VIDEOGRAPHER)/02 - Day 1 Vlogs - Student Reactions & Live Interviews",
+        "driveFolderId": "1m7U0n1wu_02 - ",
+        "driveWebUrl": "https://drive.google.com/drive/folders/1m7U0n1wuICACLVBmKl8YYLqEXvmVALWQ",
+        "isDefault": true,
+        "created_at": "2026-10-27T05:57:43.653Z"
+      },
+      {
+        "id": "sub-dfa355d7",
+        "name": "03 - Day 1 Rock Concert Multi-Cam (4K 60fps)",
+        "path": "/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Vikram Malhotra (VIDEOGRAPHER)/03 - Day 1 Rock Concert Multi-Cam (4K 60fps)",
+        "driveFolderId": "1m7U0n1wu_03 - ",
+        "driveWebUrl": "https://drive.google.com/drive/folders/1m7U0n1wuICACLVBmKl8YYLqEXvmVALWQ",
+        "isDefault": true,
+        "created_at": "2026-10-27T05:57:43.653Z"
+      },
+      {
+        "id": "sub-2ce44699",
+        "name": "04 - Day 2 Vlogs - Tech Hackathon Rush & Bot Fights",
+        "path": "/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Vikram Malhotra (VIDEOGRAPHER)/04 - Day 2 Vlogs - Tech Hackathon Rush & Bot Fights",
+        "driveFolderId": "1m7U0n1wu_04 - ",
+        "driveWebUrl": "https://drive.google.com/drive/folders/1m7U0n1wuICACLVBmKl8YYLqEXvmVALWQ",
+        "isDefault": true,
+        "created_at": "2026-10-27T05:57:43.653Z"
+      },
+      {
+        "id": "sub-5f76afba",
+        "name": "05 - Day 2 Vlogs - Fest Grand Finale & Highlights",
+        "path": "/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Vikram Malhotra (VIDEOGRAPHER)/05 - Day 2 Vlogs - Fest Grand Finale & Highlights",
+        "driveFolderId": "1m7U0n1wu_05 - ",
+        "driveWebUrl": "https://drive.google.com/drive/folders/1m7U0n1wuICACLVBmKl8YYLqEXvmVALWQ",
+        "isDefault": true,
+        "created_at": "2026-10-27T05:57:43.653Z"
+      },
+      {
+        "id": "sub-afd824b6",
+        "name": "06 - Drone Aerial B-Roll & Cinematic Establishing Shots",
+        "path": "/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Vikram Malhotra (VIDEOGRAPHER)/06 - Drone Aerial B-Roll & Cinematic Establishing Shots",
+        "driveFolderId": "1m7U0n1wu_06 - ",
+        "driveWebUrl": "https://drive.google.com/drive/folders/1m7U0n1wuICACLVBmKl8YYLqEXvmVALWQ",
+        "isDefault": true,
+        "created_at": "2026-10-27T05:57:43.653Z"
+      },
+      {
+        "id": "sub-49aaf7cb",
+        "name": "07 - Vlog Audio Stems & Wireless Mic Recordings (WAV)",
+        "path": "/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Vikram Malhotra (VIDEOGRAPHER)/07 - Vlog Audio Stems & Wireless Mic Recordings (WAV)",
+        "driveFolderId": "1m7U0n1wu_07 - ",
+        "driveWebUrl": "https://drive.google.com/drive/folders/1m7U0n1wuICACLVBmKl8YYLqEXvmVALWQ",
+        "isDefault": true,
+        "created_at": "2026-10-27T05:57:43.653Z"
+      }
+    ]
+  },
+  {
+    "id": "member-drive-simran-editor",
+    "memberEmail": "editor@dsa.cgc.edu.in",
+    "memberName": "Simran Kaur",
+    "role": "VIDEO_EDITOR",
+    "specializationLabel": "Reels, Recaps & Broadcast Delivery",
+    "driveFolderId": "1Mgc1jPrW1OnjXCWh24ExtC7Selj5v0kb",
+    "driveWebUrl": "https://drive.google.com/drive/folders/1Mgc1jPrW1OnjXCWh24ExtC7Selj5v0kb",
+    "drivePath": "/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Simran Kaur (VIDEO_EDITOR)",
+    "sharedWithEmail": "editor@dsa.cgc.edu.in",
+    "createdAt": "2026-09-01T10:00:00.000Z",
+    "updatedAt": "2026-10-27T05:57:43.653Z",
+    "subfolders": [
+      {
+        "id": "sub-c7adb207",
+        "name": "01 - Instagram Reels & Shorts (9-16 Edits)",
+        "path": "/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Simran Kaur (VIDEO_EDITOR)/01 - Instagram Reels & Shorts (9-16 Edits)",
+        "driveFolderId": "1Mgc1jPr_01 - ",
+        "driveWebUrl": "https://drive.google.com/drive/folders/1Mgc1jPrW1OnjXCWh24ExtC7Selj5v0kb",
+        "isDefault": true,
+        "created_at": "2026-10-27T05:57:43.653Z"
+      },
+      {
+        "id": "sub-b4681ee7",
+        "name": "02 - Official Fest Recap & Aftermovie (16-9 Master)",
+        "path": "/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Simran Kaur (VIDEO_EDITOR)/02 - Official Fest Recap & Aftermovie (16-9 Master)",
+        "driveFolderId": "1Mgc1jPr_02 - ",
+        "driveWebUrl": "https://drive.google.com/drive/folders/1Mgc1jPrW1OnjXCWh24ExtC7Selj5v0kb",
+        "isDefault": true,
+        "created_at": "2026-10-27T05:57:43.653Z"
+      },
+      {
+        "id": "sub-2d80c174",
+        "name": "03 - Sponsor Cutdowns & Social Teasers",
+        "path": "/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Simran Kaur (VIDEO_EDITOR)/03 - Sponsor Cutdowns & Social Teasers",
+        "driveFolderId": "1Mgc1jPr_03 - ",
+        "driveWebUrl": "https://drive.google.com/drive/folders/1Mgc1jPrW1OnjXCWh24ExtC7Selj5v0kb",
+        "isDefault": true,
+        "created_at": "2026-10-27T05:57:43.653Z"
+      },
+      {
+        "id": "sub-dbe834bc",
+        "name": "04 - DaVinci Resolve & Premiere Project Files",
+        "path": "/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Simran Kaur (VIDEO_EDITOR)/04 - DaVinci Resolve & Premiere Project Files",
+        "driveFolderId": "1Mgc1jPr_04 - ",
+        "driveWebUrl": "https://drive.google.com/drive/folders/1Mgc1jPrW1OnjXCWh24ExtC7Selj5v0kb",
+        "isDefault": true,
+        "created_at": "2026-10-27T05:57:43.653Z"
+      },
+      {
+        "id": "sub-953c0e96",
+        "name": "05 - Export Review Cuts & Draft Previews",
+        "path": "/DSA MEDIAVERSE SAVISKAR 26/Crew Personal Drives/Simran Kaur (VIDEO_EDITOR)/05 - Export Review Cuts & Draft Previews",
+        "driveFolderId": "1Mgc1jPr_05 - ",
+        "driveWebUrl": "https://drive.google.com/drive/folders/1Mgc1jPrW1OnjXCWh24ExtC7Selj5v0kb",
+        "isDefault": true,
+        "created_at": "2026-10-27T05:57:43.653Z"
+      }
+    ]
+  }
+]

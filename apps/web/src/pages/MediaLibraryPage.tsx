@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../lib/api';
 import { MediaAsset } from '../types';
+import { Modal } from '../components/ui/Modal';
 import {
   Search,
   Grid,
@@ -13,13 +14,24 @@ import {
   CheckCircle,
   FileSpreadsheet,
   Download,
-  Filter
+  Filter,
+  ArrowRightLeft,
+  RefreshCw,
+  Scissors
 } from 'lucide-react';
 
 export const MediaLibraryPage: React.FC = () => {
   const [assets, setAssets] = useState<MediaAsset[]>([]);
   const [filteredAssets, setFilteredAssets] = useState<MediaAsset[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Quick Transfer State
+  const [transferAsset, setTransferAsset] = useState<MediaAsset | null>(null);
+  const [transferTargetId, setTransferTargetId] = useState('1m7U0n1wuICACLVBmKl8YYLqEXvmVALWQ');
+  const [transferTargetPath, setTransferTargetPath] = useState('/DSA MEDIAVERSE SAVISKAR 26/Day 1/Raw Videography');
+  const [transferCategory, setTransferCategory] = useState('RAW_VIDEO');
+  const [isTransferring, setIsTransferring] = useState(false);
+  const [transferToast, setTransferToast] = useState<string | null>(null);
 
   // Filters
   const [search, setSearch] = useState('');
@@ -66,6 +78,26 @@ export const MediaLibraryPage: React.FC = () => {
     }
     setFilteredAssets(list);
   }, [assets, search, typeFilter, dayFilter]);
+
+  const handleExecuteQuickTransfer = async () => {
+    if (!transferAsset) return;
+    try {
+      setIsTransferring(true);
+      await api.transferMediaData({
+        assetIds: [transferAsset.id],
+        targetFolderId: transferTargetId,
+        targetFolderPath: transferTargetPath,
+        newCategory: transferCategory
+      });
+      setTransferToast(`Transferred "${transferAsset.filename}" into ${transferTargetPath}!`);
+      setTransferAsset(null);
+      await loadMedia();
+    } catch (err: any) {
+      alert(`Transfer failed: ${err.message || err}`);
+    } finally {
+      setIsTransferring(false);
+    }
+  };
 
   const typeIcons: Record<string, any> = {
     RAW_PHOTO: Camera,
@@ -237,15 +269,31 @@ export const MediaLibraryPage: React.FC = () => {
 
                     <div className="flex items-center justify-between text-[11px] text-slate-500">
                       <span>By {asset.uploader_name || 'Field Crew'}</span>
-                      <a
-                        href={asset.drive_web_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1 font-bold text-red-600 hover:text-red-700"
-                      >
-                        <span>Open Drive</span>
-                        <ExternalLink className="w-3 h-3" />
-                      </a>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => {
+                            setTransferAsset(asset);
+                            setTransferTargetId('1m7U0n1wuICACLVBmKl8YYLqEXvmVALWQ');
+                            setTransferTargetPath('/DSA MEDIAVERSE SAVISKAR 26/Day 1/Raw Videography');
+                            setTransferCategory('RAW_VIDEO');
+                          }}
+                          className="inline-flex items-center gap-1 font-bold text-purple-700 hover:text-purple-800 bg-purple-50 hover:bg-purple-100 px-2 py-0.5 rounded transition-colors"
+                          title="Transfer this asset to Vlogging / Folder"
+                        >
+                          <ArrowRightLeft className="w-3 h-3" />
+                          <span>Transfer</span>
+                        </button>
+
+                        <a
+                          href={asset.drive_web_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 font-bold text-red-600 hover:text-red-700"
+                        >
+                          <span>Open Drive</span>
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -264,7 +312,7 @@ export const MediaLibraryPage: React.FC = () => {
                 <th className="px-4 py-3">Linked Assignment</th>
                 <th className="px-4 py-3">Uploader</th>
                 <th className="px-4 py-3">File Size</th>
-                <th className="px-4 py-3 text-right">Drive Action</th>
+                <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 font-medium">
@@ -282,15 +330,30 @@ export const MediaLibraryPage: React.FC = () => {
                     {formatFileSize(asset.file_size_bytes)}
                   </td>
                   <td className="px-4 py-3 text-right">
-                    <a
-                      href={asset.drive_web_url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-1 text-red-600 hover:text-red-700 font-bold"
-                    >
-                      <span>Drive File</span>
-                      <ExternalLink className="w-3 h-3" />
-                    </a>
+                    <div className="flex items-center justify-end gap-2">
+                      <button
+                        onClick={() => {
+                          setTransferAsset(asset);
+                          setTransferTargetId('1m7U0n1wuICACLVBmKl8YYLqEXvmVALWQ');
+                          setTransferTargetPath('/DSA MEDIAVERSE SAVISKAR 26/Day 1/Raw Videography');
+                          setTransferCategory('RAW_VIDEO');
+                        }}
+                        className="inline-flex items-center gap-1 font-bold text-purple-700 hover:text-purple-800 bg-purple-50 hover:bg-purple-100 px-2 py-0.5 rounded transition-colors text-[11px]"
+                      >
+                        <ArrowRightLeft className="w-3 h-3" />
+                        <span>Transfer</span>
+                      </button>
+
+                      <a
+                        href={asset.drive_web_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 text-red-600 hover:text-red-700 font-bold"
+                      >
+                        <span>Drive File</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -298,6 +361,126 @@ export const MediaLibraryPage: React.FC = () => {
           </table>
         </div>
       )}
+
+      {/* Quick Transfer Modal */}
+      <Modal
+        isOpen={Boolean(transferAsset)}
+        onClose={() => setTransferAsset(null)}
+        title="Transfer Media Asset Directly on Google Drive"
+      >
+        {transferAsset && (
+          <div className="space-y-4">
+            <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
+              <span className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Asset to Transfer</span>
+              <p className="text-xs font-bold text-slate-900 truncate">{transferAsset.filename}</p>
+              <p className="text-[11px] text-slate-500">Current Category: {transferAsset.media_type}</p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                Select Destination
+              </label>
+              <div className="space-y-2">
+                <label className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer ${
+                  transferTargetId === '1m7U0n1wuICACLVBmKl8YYLqEXvmVALWQ' ? 'bg-purple-50 border-purple-300' : 'bg-white border-slate-200'
+                }`}>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      name="quickTarget"
+                      checked={transferTargetId === '1m7U0n1wuICACLVBmKl8YYLqEXvmVALWQ'}
+                      onChange={() => {
+                        setTransferTargetId('1m7U0n1wuICACLVBmKl8YYLqEXvmVALWQ');
+                        setTransferTargetPath('/DSA MEDIAVERSE SAVISKAR 26/Day 1/Raw Videography');
+                        setTransferCategory('RAW_VIDEO');
+                      }}
+                      className="text-purple-600"
+                    />
+                    <div>
+                      <span className="text-xs font-bold text-slate-900">Day 1 Vlogging & Raw Videography</span>
+                      <p className="text-[10px] text-slate-500">Moves file directly to Day 1 Video folder</p>
+                    </div>
+                  </div>
+                  <Film className="w-4 h-4 text-purple-600" />
+                </label>
+
+                <label className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer ${
+                  transferTargetId === '1LF1A9AbGiWyQlYKT0V0v7LH3OPCcBGUF' ? 'bg-purple-50 border-purple-300' : 'bg-white border-slate-200'
+                }`}>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      name="quickTarget"
+                      checked={transferTargetId === '1LF1A9AbGiWyQlYKT0V0v7LH3OPCcBGUF'}
+                      onChange={() => {
+                        setTransferTargetId('1LF1A9AbGiWyQlYKT0V0v7LH3OPCcBGUF');
+                        setTransferTargetPath('/DSA MEDIAVERSE SAVISKAR 26/Day 2/Raw Videography');
+                        setTransferCategory('RAW_VIDEO');
+                      }}
+                      className="text-purple-600"
+                    />
+                    <div>
+                      <span className="text-xs font-bold text-slate-900">Day 2 Vlogging & Raw Videography</span>
+                      <p className="text-[10px] text-slate-500">Moves file directly to Day 2 Video folder</p>
+                    </div>
+                  </div>
+                  <Film className="w-4 h-4 text-purple-600" />
+                </label>
+
+                <label className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer ${
+                  transferTargetId === '1Mgc1jPrW1OnjXCWh24ExtC7Selj5v0kb' ? 'bg-blue-50 border-blue-300' : 'bg-white border-slate-200'
+                }`}>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      name="quickTarget"
+                      checked={transferTargetId === '1Mgc1jPrW1OnjXCWh24ExtC7Selj5v0kb'}
+                      onChange={() => {
+                        setTransferTargetId('1Mgc1jPrW1OnjXCWh24ExtC7Selj5v0kb');
+                        setTransferTargetPath('/DSA MEDIAVERSE SAVISKAR 26/Day 1/Editing Projects');
+                        setTransferCategory('EDITED_DRAFT');
+                      }}
+                      className="text-blue-600"
+                    />
+                    <div>
+                      <span className="text-xs font-bold text-slate-900">Editing Suite (Reels & Recaps)</span>
+                      <p className="text-[10px] text-slate-500">Hands over footage to video editors</p>
+                    </div>
+                  </div>
+                  <Scissors className="w-4 h-4 text-blue-600" />
+                </label>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setTransferAsset(null)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleExecuteQuickTransfer}
+                disabled={isTransferring}
+                className="px-5 py-2.5 rounded-xl text-xs font-bold bg-purple-700 hover:bg-purple-800 disabled:opacity-50 text-white shadow-xs transition-colors flex items-center gap-2"
+              >
+                {isTransferring ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Transferring in Google Drive...</span>
+                  </>
+                ) : (
+                  <>
+                    <ArrowRightLeft className="w-3.5 h-3.5" />
+                    <span>Confirm Transfer</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 };
