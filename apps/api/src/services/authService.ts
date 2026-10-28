@@ -158,7 +158,7 @@ export class AuthService {
       name: profile.full_name,
       roles
     };
-    return jwt.sign(payload, config.devJwtSecret, { expiresIn: '14d' });
+    return jwt.sign(payload, config.devJwtSecret, { expiresIn: '365d' });
   }
 
   // Register a new crew member with rigorous input validation
@@ -276,9 +276,23 @@ export class AuthService {
     let profile = db.profiles.find(p => p.email.toLowerCase() === cleanEmail)
                || this.registeredProfiles.find(p => p.email.toLowerCase() === cleanEmail);
 
+    // Fallback 1: Query Supabase PostgreSQL directly in case server restarted / woke from sleep
+    if (!profile) {
+      try {
+        const cloudProfile = await SupabaseService.getProfileByEmail(cleanEmail);
+        if (cloudProfile) {
+          profile = cloudProfile;
+          if (!db.profiles.some(p => p.id === cloudProfile.id)) {
+            db.profiles.push(cloudProfile);
+          }
+          this.saveRegisteredProfile(cloudProfile);
+        }
+      } catch {}
+    }
+
     const cred = this.credentials.find(c => c.email.toLowerCase() === cleanEmail);
 
-    // Fallback: If user was registered before server restart, rehydrate profile
+    // Fallback 2: If user credential was persisted on disk before server restart, rehydrate profile
     if (!profile && cred) {
       profile = {
         id: cred.id,

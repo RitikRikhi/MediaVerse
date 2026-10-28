@@ -72,19 +72,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (currentUser && currentUser.id) {
         setUser(currentUser);
         localStorage.setItem('mediaverse_user_profile', JSON.stringify(currentUser));
+        localStorage.setItem('mediaverse_last_email', currentUser.email);
         if (currentUser.roles && currentUser.roles.length > 0) {
           setActiveRole(prev => (currentUser.roles.includes(prev) ? prev : currentUser.roles[0]));
         }
       }
     } catch (err: any) {
       console.warn('Could not validate current user with server:', err.message);
-      // Only clear if explicitly unauthorized 401
-      if (err.message && err.message.toLowerCase().includes('unauthorized')) {
-        localStorage.removeItem('mediaverse_user_profile');
-        localStorage.removeItem('mediaverse_active_user_id');
-        localStorage.removeItem('mediaverse_auth_token');
-        setUser(null);
-      }
+      // Resilient session: Keep locally cached profile active so server restarts / sleep never log out users
     } finally {
       setIsLoading(false);
     }
@@ -112,6 +107,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       localStorage.setItem('mediaverse_user_profile', JSON.stringify(res.user));
       localStorage.setItem('mediaverse_active_user_id', res.user.id);
       localStorage.setItem('mediaverse_auth_token', res.token);
+      localStorage.setItem('mediaverse_last_email', res.user.email);
       if (res.user.roles && res.user.roles.length > 0) {
         setActiveRole(res.user.roles[0]);
       }
@@ -136,6 +132,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       localStorage.setItem('mediaverse_user_profile', JSON.stringify(res.user));
       localStorage.setItem('mediaverse_active_user_id', res.user.id);
       localStorage.setItem('mediaverse_auth_token', res.token);
+      localStorage.setItem('mediaverse_last_email', res.user.email);
       if (res.user.roles && res.user.roles.length > 0) {
         setActiveRole(res.user.roles[0]);
       }

@@ -79,13 +79,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
   const { login, register } = useAuth();
   const [tab, setTab] = useState<'LOGIN' | 'REGISTER'>('LOGIN');
 
-  // Login form state
-  const [loginEmail, setLoginEmail] = useState('');
+  // Login form state (auto-remember last used email)
+  const [loginEmail, setLoginEmail] = useState(() => localStorage.getItem('mediaverse_last_email') || '');
   const [loginPassword, setLoginPassword] = useState('');
 
-  // Register form state
+  // Register form state (auto-remember last used email)
   const [regName, setRegName] = useState('');
-  const [regEmail, setRegEmail] = useState('');
+  const [regEmail, setRegEmail] = useState(() => localStorage.getItem('mediaverse_last_email') || '');
   const [regPassword, setRegPassword] = useState('');
   const [regRole, setRegRole] = useState<UserRole>('PHOTOGRAPHER');
   const [regPhone, setRegPhone] = useState('');
@@ -128,12 +128,20 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
 
     try {
       await login(cleanEmail, loginPassword);
+      localStorage.setItem('mediaverse_last_email', cleanEmail);
       setSuccessMsg('Signed in successfully! Entering workspace...');
       setTimeout(() => {
         onClose();
       }, 500);
     } catch (err: any) {
-      setErrorMsg(err.message || 'Login failed. Please check your credentials or register.');
+      const errMsg = err.message || '';
+      if (errMsg.toLowerCase().includes('no crew account') || errMsg.toLowerCase().includes('not found') || errMsg.toLowerCase().includes('register')) {
+        setRegEmail(cleanEmail);
+        setTab('REGISTER');
+        setErrorMsg(`No account found for "${cleanEmail}" yet. Switched to Register — just enter your name and you're in!`);
+      } else {
+        setErrorMsg(errMsg || 'Login failed. Please check your credentials.');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -173,12 +181,20 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
         role: regRole,
         phone: regPhone.trim() || '+91 9876543210'
       });
+      localStorage.setItem('mediaverse_last_email', cleanEmail);
       setSuccessMsg(`🎉 Welcome to SAVISKAR 2026, ${cleanName}! Your Google Drive access is active for ${cleanEmail}. Entering workspace...`);
       setTimeout(() => {
         onClose();
       }, 900);
     } catch (err: any) {
-      setErrorMsg(err.message || 'Registration failed. Please check inputs.');
+      const errMsg = err.message || '';
+      if (errMsg.toLowerCase().includes('already registered') || errMsg.toLowerCase().includes('already exists')) {
+        setLoginEmail(cleanEmail);
+        setTab('LOGIN');
+        setErrorMsg(`"${cleanEmail}" is already registered! Please enter your password to sign in.`);
+      } else {
+        setErrorMsg(errMsg || 'Registration failed. Please check inputs.');
+      }
     } finally {
       setIsLoading(false);
     }

@@ -304,6 +304,33 @@ export class SupabaseService {
     }
   }
 
+  // Get Profile by Email directly from Cloud Database
+  static async getProfileByEmail(email: string): Promise<UserProfile | null> {
+    if (!this.isAvailable()) return null;
+    try {
+      const cleanEmail = email.trim().toLowerCase();
+      const { data, error } = await supabase!
+        .from('profiles')
+        .select('*')
+        .ilike('email', cleanEmail)
+        .maybeSingle();
+
+      if (error || !data) return null;
+
+      const rolesRes = await supabase!.from('user_roles').select('role').eq('user_id', data.id);
+      const userRoles = rolesRes.data && rolesRes.data.length > 0
+        ? rolesRes.data.map((r: any) => r.role)
+        : (Array.isArray(data.roles) && data.roles.length > 0 ? data.roles : ['PHOTOGRAPHER']);
+
+      return {
+        ...data,
+        roles: userRoles
+      };
+    } catch {
+      return null;
+    }
+  }
+
   // Persist Profile
   static async persistProfile(profile: Partial<UserProfile>): Promise<void> {
     if (!this.isAvailable()) return;
